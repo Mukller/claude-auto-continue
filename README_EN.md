@@ -10,6 +10,11 @@ Automatically finds and clicks the **Try again** button in Claude Desktop on a s
 
 The button is located via **UI Automation text search**, with no manual template capture needed. Electron apps often don't assign the correct ARIA role (`ControlType=Button`) to their elements, so the search matches visible text (`Name`) on any control type — exact match takes priority, with a minimum-size filter so it doesn't latch onto a random tiny icon.
 
+<div align="center">
+<img src="screenshots/app-idle.png" width="46%" alt="Main screen — schedule, detected Claude Desktop window and chat list" />
+<img src="screenshots/app-running.png" width="46%" alt="Countdown running before the scheduled trigger" />
+</div>
+
 ---
 
 ## Features
@@ -64,6 +69,7 @@ The desktop shortcut uses `pythonw.exe` — opens without a console window.
 - `find_sidebar_chats` — locates the navigation sidebar by geometry, not by name (the tree can contain several `"Sidebar"`-named nodes, e.g. nested file panels inside code artifacts), then collects chat buttons, filtering out UI chrome (Pinned/Recents/More options/Relaunch to update, etc.).
 - `find_button_uia` — walks the tree in reverse child order (the last elements are usually at the bottom of the chat, where the button appears), prioritizing exact text match, with substring match only as a fallback, filtered by minimum size.
 - `bring_to_foreground` — brings the Claude window to the front via `AttachThreadInput` before clicking (a plain `SetForegroundWindow` call from a background process is often silently ignored by Windows — the window can stay behind another one, e.g. a video call window, and the click lands in the wrong place).
+- `find_message_input` — clicks the message input box (the `"Prompt"` container, also a custom editor with no standard Edit role) before sending Enter. Without this, focus stays on the sidebar chat button and Enter goes nowhere.
 
 ---
 

@@ -59,9 +59,11 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 TPL_DIR = os.path.join(APP_DIR, 'templates')
 os.makedirs(TPL_DIR, exist_ok=True)
 
+# "Continue" больше не ищется как кнопка (см. auto_continue в run_cycle) —
+# после лимита Claude Code обычно просто ждёт Enter, без всякой кнопки.
+# Шаблон нужен только для запасного варианта поиска "Try again".
 TEMPLATES = {
     'try_again': {'label': 'Try again', 'file': os.path.join(TPL_DIR, 'try_again.png')},
-    'continue':  {'label': 'Continue',  'file': os.path.join(TPL_DIR, 'continue.png')},
 }
 
 
@@ -381,8 +383,15 @@ def template_fallback_click(labels: list, confidence: float,
 #  ГЛАВНЫЙ ЦИКЛ: НАЙТИ ЧАТЫ → ПЕРЕКЛЮЧИТЬСЯ → НАЙТИ КНОПКУ → КЛИК
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run_cycle(n: int, labels: list, confidence: float, press_enter_after: bool,
+TRY_AGAIN_LABELS = ['Try again', 'try again', 'Retry', 'Попробовать снова']
+
+
+def run_cycle(n: int, search_try_again: bool, auto_continue: bool, confidence: float,
              log_fn, badge_fn=None) -> int:
+    """search_try_again — искать и кликать реальную кнопку "Try again" (лимит запросов).
+    auto_continue — после захода в чат нажать Enter НЕЗАВИСИМО от того, нашлась ли
+    кнопка: обычно после исчерпания лимита Claude Code просто ждёт ввода без всякой
+    кнопки, и "продолжить" — это буквально нажать Enter в пустом поле ввода."""
     if not HAS_UIA:
         log_fn('  uiautomation не установлен — авто-поиск недоступен', 'error')
         return 0
@@ -404,22 +413,32 @@ def run_cycle(n: int, labels: list, confidence: float, press_enter_after: bool,
 
     ok = 0
 
-    def try_button_in_current_view():
+    def process_current_view() -> bool:
         nonlocal ok
-        if badge_fn: badge_fn(1, 'trying')
-        _, rect = find_button_uia(window['ctrl'], labels, log_fn)
-        if rect:
-            if badge_fn: badge_fn(1, 'ok')
-            if click_rect(rect, log_fn, press_enter_after):
-                ok += 1
-                return True
-        else:
-            if badge_fn: badge_fn(1, 'idle')
-        # запасной вариант — шаблон, если задан
-        if template_fallback_click(labels, confidence, press_enter_after, log_fn, badge_fn):
+        did_something = False
+
+        if search_try_again:
+            if badge_fn: badge_fn(1, 'trying')
+            _, rect = find_button_uia(window['ctrl'], TRY_AGAIN_LABELS, log_fn)
+            if rect:
+                if badge_fn: badge_fn(1, 'ok')
+                if click_rect(rect, log_fn, press_enter_after=False):
+                    did_something = True
+            else:
+                if badge_fn: badge_fn(1, 'idle')
+                if template_fallback_click(['try_again'], confidence, False, log_fn, badge_fn):
+                    did_something = True
+
+        if auto_continue and pyautogui is not None:
+            if did_something:
+                time.sleep(0.4)  # дать кнопке отработать перед Enter
+            pyautogui.press('enter')
+            log_fn('  → Enter отправлен (продолжить)', 'success')
+            did_something = True
+
+        if did_something:
             ok += 1
-            return True
-        return False
+        return did_something
 
     if chats:
         targets = chats[:max(1, n)]
@@ -428,11 +447,11 @@ def run_cycle(n: int, labels: list, confidence: float, press_enter_after: bool,
             log_fn(f'  [{i+1}] {chat["name"][:44]}', 'dim')
             click_rect(chat['rect'], log_fn)
             time.sleep(0.7)
-            if not try_button_in_current_view():
-                log_fn('       кнопка не найдена в этом чате', 'dim')
+            if not process_current_view():
+                log_fn('       ничего не сделано в этом чате', 'dim')
     else:
-        log_fn('  Сайдбар с чатами не обнаружен — ищем кнопку в текущем виде окна', 'dim')
-        try_button_in_current_view()
+        log_fn('  Сайдбар с чатами не обнаружен — работаем с текущим видом окна', 'dim')
+        process_current_view()
 
     return ok
 
@@ -759,22 +778,28 @@ class App:
         tk.Frame(wc, bg=BRD, height=1).pack(fill='x', pady=(10, 8))
         brow = tk.Frame(wc, bg=C1)
         brow.pack(fill='x')
-        tk.Label(brow, text='Кнопки:', bg=C1, fg=DIM, font=('Segoe UI', 8, 'bold')
-                 ).pack(side='left')
-        self.v_btn_try  = tk.BooleanVar(value=True)
-        self.v_btn_cont = tk.BooleanVar(value=True)
-        for lbl, var in [('Try again', self.v_btn_try), ('Continue', self.v_btn_cont)]:
-            tk.Checkbutton(brow, text=lbl, variable=var, bg=C1, fg=DIM, selectcolor=C2,
-                           activebackground=C1, activeforeground=TXT,
-                           font=('Segoe UI', 9), cursor='hand2').pack(side='left', padx=(14, 0))
+        tk.Label(brow, text='В каждом чате:', bg=C1, fg=DIM, font=('Segoe UI', 8, 'bold')
+                 ).pack(anchor='w')
 
-        erow = tk.Frame(wc, bg=C1)
-        erow.pack(fill='x', pady=(6, 0))
-        self.v_enter = tk.BooleanVar(value=True)
-        tk.Checkbutton(erow, text='Нажимать Enter после клика (отправить)',
-                       variable=self.v_enter, bg=C1, fg=DIM, selectcolor=C2,
-                       activebackground=C1, activeforeground=TXT,
-                       font=('Segoe UI', 9), cursor='hand2').pack(side='left')
+        self.v_btn_try  = tk.BooleanVar(value=True)
+        row_try = tk.Frame(wc, bg=C1)
+        row_try.pack(fill='x', pady=(6, 0))
+        tk.Checkbutton(row_try, text='Try again', variable=self.v_btn_try,
+                       bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
+                       activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2'
+                       ).pack(side='left')
+        tk.Label(row_try, text=' — найти и нажать кнопку (ошибка лимита сервера)',
+                 bg=C1, fg=DIM, font=('Segoe UI', 7)).pack(side='left')
+
+        self.v_btn_cont = tk.BooleanVar(value=True)
+        row_cont = tk.Frame(wc, bg=C1)
+        row_cont.pack(fill='x', pady=(4, 0))
+        tk.Checkbutton(row_cont, text='Continue', variable=self.v_btn_cont,
+                       bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
+                       activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2'
+                       ).pack(side='left')
+        tk.Label(row_cont, text=' — нажать Enter (продолжить сессию, кнопки не нужно)',
+                 bg=C1, fg=DIM, font=('Segoe UI', 7)).pack(side='left')
 
         FlatBtn(wc, '🔍  Проверить сейчас', self._test_find, bg=C2, fg=DIM,
                 hbg=BRD, hfg=TXT, font=('Segoe UI', 8), padx=10, pady=6
@@ -870,14 +895,6 @@ class App:
             tk.Label(self.chat_list, text=f'  … ещё {len(chats)-8}', bg=C1, fg=DIM,
                      font=('Segoe UI', 7)).pack(anchor='w')
 
-    def _get_labels(self) -> list:
-        labels = []
-        if self.v_btn_try.get(): labels += ['Try again', 'try again', 'Попробовать снова', 'Retry']
-        if self.v_btn_cont.get(): labels += ['Continue', 'continue', 'Продолжить']
-        return labels or ['Try again', 'Continue']
-
-    def _get_template_keys(self) -> list:
-        return [k for k, row in self.tpl_rows.items() if row.var.get()]
 
     # ── Захват шаблона ──────────────────────────────────────────────────────
 
@@ -984,24 +1001,23 @@ class App:
 
         self._slog('Время! Ищу окно и чаты…', 'warn')
         n = self.sp_n.get()
-        labels = self._get_labels()
+        try_again, auto_cont = self.v_btn_try.get(), self.v_btn_cont.get()
         conf = self.v_conf.get()
-        enter = self.v_enter.get()
 
         ok = 0
         for attempt in range(1, 4):
             if self._stop_evt.is_set(): return
             self._slog(f'Попытка {attempt}/3:', 'dim')
-            ok = run_cycle(n, labels, conf, enter, self._slog, self._badge)
+            ok = run_cycle(n, try_again, auto_cont, conf, self._slog, self._badge)
             if ok: break
             if attempt < 3: self._stop_evt.wait(5)
 
         if ok:
-            self.root.after(0, lambda c=ok: self.ring.draw(100, '✓', f'Клик×{c}', SUC))
-            self._slog(f'✓  Успех — нажато {ok} раз!', 'success')
+            self.root.after(0, lambda c=ok: self.ring.draw(100, '✓', f'Готово×{c}', SUC))
+            self._slog(f'✓  Успех — обработано {ok} чат(ов)!', 'success')
         else:
             self.root.after(0, lambda: self.ring.draw(100, '✗', 'Не найдено', ERR))
-            self._slog('✗  Кнопка не найдена. Проверь, что Claude Desktop открыт.', 'error')
+            self._slog('✗  Ничего не сделано. Проверь, что Claude Desktop открыт.', 'error')
 
         if self.v_watch.get() and not self._stop_evt.is_set():
             iv = int(self.v_interval.get() or 30)
@@ -1009,8 +1025,8 @@ class App:
             while not self._stop_evt.is_set():
                 self._stop_evt.wait(iv)
                 if self._stop_evt.is_set(): break
-                run_cycle(self.sp_n.get(), self._get_labels(), self.v_conf.get(),
-                         self.v_enter.get(), self._slog, self._badge)
+                run_cycle(self.sp_n.get(), self.v_btn_try.get(), self.v_btn_cont.get(),
+                         self.v_conf.get(), self._slog, self._badge)
 
         if not self._stop_evt.is_set():
             self._running = False
@@ -1022,29 +1038,33 @@ class App:
 
     def _click_now(self):
         self._log('Ищу и нажимаю прямо сейчас…', 'accent')
-        n, labels = self.sp_n.get(), self._get_labels()
-        conf, enter = self.v_conf.get(), self.v_enter.get()
+        n = self.sp_n.get()
+        try_again, auto_cont, conf = self.v_btn_try.get(), self.v_btn_cont.get(), self.v_conf.get()
         threading.Thread(
-            target=lambda: run_cycle(n, labels, conf, enter, self._slog, self._badge),
+            target=lambda: run_cycle(n, try_again, auto_cont, conf, self._slog, self._badge),
             daemon=True
         ).start()
 
     def _test_find(self):
-        self._log('Тестовый поиск (без переключения чатов)…', 'accent')
+        self._log('Тестовый поиск кнопки Try again (без переключения чатов, без Enter)…', 'accent')
         def run():
             windows = find_claude_windows(self._slog)
             if not windows:
                 self._slog('Claude Desktop не найден.', 'error')
                 return
             self._badge(1, 'trying')
-            _, rect = find_button_uia(windows[0]['ctrl'], self._get_labels(), self._slog)
+            _, rect = find_button_uia(windows[0]['ctrl'], TRY_AGAIN_LABELS, self._slog)
             if rect:
                 self._badge(1, 'ok')
-                self._slog(f'✓ Кнопка найдена на экране в области '
+                self._slog(f'✓ Кнопка "Try again" найдена на экране в области '
                           f'({int(rect.left)}, {int(rect.top)})', 'success')
             else:
                 self._badge(1, 'idle')
-                self._slog('Кнопка не найдена в текущем виде окна.', 'dim')
+                self._slog('Кнопка "Try again" не найдена в текущем виде окна '
+                          '(это нормально, если нет активной ошибки лимита).', 'dim')
+            if self.v_btn_cont.get():
+                self._slog('Continue включён: при СТАРТ/Сейчас в каждом чате '
+                          'будет нажат Enter независимо от результата поиска выше.', 'dim')
         threading.Thread(target=run, daemon=True).start()
 
 

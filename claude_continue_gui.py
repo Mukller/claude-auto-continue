@@ -200,6 +200,37 @@ def _find_sidebar_container(window_ctrl, max_depth=15):
     return None
 
 
+def find_message_input(window_ctrl, log_fn, max_nodes=6000, time_budget=3.0):
+    """Найти поле ввода сообщения ('Prompt') — без клика в него фокус остаётся
+    на элементе сайдбара после переключения чата, и Enter улетает в никуда,
+    сообщение не отправляется."""
+    if not HAS_UIA:
+        return None
+    start = time.time()
+    stack = [window_ctrl]
+    visited = 0
+    while stack:
+        if time.time() - start > time_budget or visited > max_nodes:
+            log_fn('  Поиск поля ввода: превышен лимит (время/узлы)', 'dim')
+            break
+        ctrl = stack.pop()
+        visited += 1
+        try:
+            if ctrl.ControlTypeName == 'GroupControl' and (ctrl.Name or '').strip() == 'Prompt':
+                rect = ctrl.BoundingRectangle
+                if rect and rect.width() > 0 and rect.height() > 0:
+                    return rect
+            child = ctrl.GetFirstChildControl()
+            kids = []
+            while child:
+                kids.append(child)
+                child = child.GetNextSiblingControl()
+            stack.extend(kids)
+        except Exception:
+            continue
+    return None
+
+
 def find_sidebar_chats(window_ctrl, log_fn, max_nodes=6000, time_budget=4.0) -> list:
     """Список чатов — кнопки внутри навигационного сайдбара, отфильтрованные
     от обвязки (Pinned/Recents/More options/Relaunch to update и т.п.)."""
@@ -432,6 +463,12 @@ def run_cycle(n: int, search_try_again: bool, auto_continue: bool, confidence: f
         if auto_continue and pyautogui is not None:
             if did_something:
                 time.sleep(0.4)  # дать кнопке отработать перед Enter
+            input_rect = find_message_input(window['ctrl'], log_fn)
+            if input_rect:
+                click_rect(input_rect, log_fn, press_enter_after=False)
+                time.sleep(0.2)
+            else:
+                log_fn('  ⚠ Поле ввода не найдено, жму Enter вслепую', 'warn')
             pyautogui.press('enter')
             log_fn('  → Enter отправлен (продолжить)', 'success')
             did_something = True

@@ -1,3 +1,4 @@
 pyautogui
 pillow
+uiautomation
 opencv-python-headless

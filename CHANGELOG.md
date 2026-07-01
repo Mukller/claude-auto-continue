@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.1.1]
+### Fixed
+- `Continue` (Enter) wasn't actually sending the message — after switching
+  chats via the sidebar, keyboard focus stayed on the sidebar button, so
+  Enter went nowhere. Now the app finds the message input box (`Prompt`)
+  and clicks into it first to move focus there before pressing Enter.
+
 ## [3.1.0]
 ### Fixed
 - `Continue` checkbox no longer searches for a "Continue" button that usually

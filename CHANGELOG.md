@@ -6,6 +6,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.2.0]
+### Added
+- Time fields (hour/minute) are now editable directly — click and type
+  digits instead of only using the +/- steppers. Enter or clicking away
+  commits and clamps the value to its valid range.
+- Language switcher (RU/EN) at the top of the window. Russian stays the
+  default and unchanged; every menu label, button, checkbox, badge, and
+  app-level log message gets an English translation. The internal engine
+  diagnostic trace (window/chat detection, click attempts) stays
+  Russian-only by design — the toggle covers the UI chrome, not the raw
+  automation log.
+### Changed
+- All buttons now have rounded corners (Canvas-based rounded rectangles)
+  with a smooth color fade on hover and a brief darkened flash on press,
+  instead of the previous flat rectangular labels with an instant color
+  swap. Same visual layout, same click behavior — just softer and more
+  responsive-feeling.
+
 ## [3.1.1]
 ### Fixed
 - `Continue` (Enter) wasn't actually sending the message — after switching

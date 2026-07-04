@@ -761,18 +761,146 @@ class Spinner(tk.Frame):
         self._sv.set(f'{self._v:02d}')
 
 
-class FlatBtn(tk.Label):
-    def __init__(self, parent, text, cmd, bg, fg, hbg=None, hfg=None, **kw):
-        super().__init__(parent, text=text, bg=bg, fg=fg, cursor='hand2', **kw)
+def _hex_to_rgb(h):
+    h = h.lstrip('#')
+    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+
+
+def _rgb_to_hex(rgb):
+    return '#%02x%02x%02x' % tuple(max(0, min(255, int(c))) for c in rgb)
+
+
+def _lerp_color(c1, c2, t):
+    r1, g1, b1 = _hex_to_rgb(c1)
+    r2, g2, b2 = _hex_to_rgb(c2)
+    return _rgb_to_hex((r1 + (r2-r1)*t, g1 + (g2-g1)*t, b1 + (b2-b1)*t))
+
+
+def _darken(hexcolor, factor=0.85):
+    r, g, b = _hex_to_rgb(hexcolor)
+    return _rgb_to_hex((r*factor, g*factor, b*factor))
+
+
+class FlatBtn(tk.Canvas):
+    """Кнопка со скруглёнными углами (rounded rect на Canvas) и плавным
+    переходом цвета при наведении/нажатии — сохраняет тот же интерфейс,
+    что и раньше (.config(text=...), .recolor(...)), чтобы не трогать
+    остальной код и раскладку."""
+
+    RADIUS = 8
+    _ANIM_STEPS = 7
+    _ANIM_DELAY = 12
+
+    def __init__(self, parent, text, cmd, bg, fg, hbg=None, hfg=None,
+                font=('Segoe UI', 9), padx=14, pady=8, **kw):
+        self._font = font
+        self._padx, self._pady = padx, pady
         self._bg, self._fg = bg, fg
         self._hbg, self._hfg = hbg or bg, hfg or fg
-        self.bind('<Button-1>', lambda _: cmd())
-        self.bind('<Enter>', lambda _: self.config(bg=self._hbg, fg=self._hfg))
-        self.bind('<Leave>', lambda _: self.config(bg=self._bg, fg=self._fg))
+        self._cur_bg = bg
+        self._cmd = cmd
+        self._text = text
+        self._anim_job = None
+        self._hovering = False
+
+        outer = kw.pop('bg', None) or parent.cget('bg')
+        tmp = tk.Label(parent, text=text, font=font)
+        tmp.update_idletasks()
+        bw = tmp.winfo_reqwidth() + padx * 2
+        bh = tmp.winfo_reqheight() + pady * 2
+        tmp.destroy()
+
+        # NB: не называть self._w/self._h — эти имена зарезервированы
+        # внутри tkinter.Misc (self._w хранит Tk-путь виджета) и будут
+        # молча перезаписаны конструктором Canvas ниже.
+        self._bw, self._bh = bw, bh
+        super().__init__(parent, width=bw, height=bh, bg=outer,
+                         highlightthickness=0, cursor='hand2', **kw)
+        self._draw(bg, fg)
+
+        self.bind('<Configure>', self._on_resize)
+        self.bind('<Enter>', self._on_enter)
+        self.bind('<Leave>', self._on_leave)
+        self.bind('<ButtonPress-1>', self._on_press)
+        self.bind('<ButtonRelease-1>', self._on_release)
+
+    # ── отрисовка ───────────────────────────────────────────────────────────
+
+    def _rounded_rect(self, x1, y1, x2, y2, r, **kwargs):
+        r = min(r, (x2 - x1) / 2, (y2 - y1) / 2)
+        points = [
+            x1+r, y1,  x2-r, y1,  x2, y1,  x2, y1+r,  x2, y2-r,  x2, y2,
+            x2-r, y2,  x1+r, y2,  x1, y2,  x1, y2-r,  x1, y1+r,  x1, y1,
+        ]
+        return self.create_polygon(points, smooth=True, **kwargs)
+
+    def _draw(self, bg_color, fg_color):
+        self.delete('all')
+        self._rounded_rect(0, 0, self._bw, self._bh, self.RADIUS,
+                           fill=bg_color, outline=bg_color)
+        self.create_text(self._bw/2, self._bh/2, text=self._text,
+                         fill=fg_color, font=self._font)
+
+    def _on_resize(self, event):
+        if event.width > 1 and event.height > 1:
+            self._bw, self._bh = event.width, event.height
+            self._draw(self._cur_bg, self._fg)
+
+    # ── анимация hover ──────────────────────────────────────────────────────
+
+    def _animate_to(self, target_bg, target_fg):
+        if self._anim_job:
+            self.after_cancel(self._anim_job)
+        start_bg = self._cur_bg
+
+        def step(i):
+            t = i / self._ANIM_STEPS
+            color = _lerp_color(start_bg, target_bg, t)
+            self._cur_bg = color
+            self._draw(color, target_fg)
+            if i < self._ANIM_STEPS:
+                self._anim_job = self.after(self._ANIM_DELAY, lambda: step(i + 1))
+            else:
+                self._anim_job = None
+        step(1)
+
+    def _on_enter(self, _e):
+        self._hovering = True
+        self._animate_to(self._hbg, self._hfg)
+
+    def _on_leave(self, _e):
+        self._hovering = False
+        self._animate_to(self._bg, self._fg)
+
+    def _on_press(self, _e):
+        if self._anim_job:
+            self.after_cancel(self._anim_job)
+            self._anim_job = None
+        self._draw(_darken(self._hbg if self._hovering else self._bg), self._hfg)
+
+    def _on_release(self, e):
+        inside = 0 <= e.x <= self._bw and 0 <= e.y <= self._bh
+        target_bg, target_fg = (self._hbg, self._hfg) if inside else (self._bg, self._fg)
+        self._draw(target_bg, target_fg)
+        self._cur_bg = target_bg
+        if inside:
+            self._cmd()
+
+    # ── публичный интерфейс (совместим со старым Label-вариантом) ───────────
+
+    def config(self, **kwargs):
+        if 'text' in kwargs:
+            self._text = kwargs.pop('text')
+            self._draw(self._cur_bg, self._fg)
+        if kwargs:
+            super().config(**kwargs)
+
+    configure = config
 
     def recolor(self, bg, fg, hbg=None):
         self._bg, self._fg, self._hbg = bg, fg, hbg or bg
-        self.config(bg=bg, fg=fg)
+        self._cur_bg = bg
+        self._draw(bg, fg)
 
 
 class Badge(tk.Frame):
@@ -889,16 +1017,14 @@ class App:
         langbar.pack(fill='x')
         langwrap = tk.Frame(langbar, bg=BG)
         langwrap.pack(side='right', padx=22)
-        self.btn_lang_ru = tk.Label(langwrap, text='RU', bg=ACC, fg=BG,
-                                    font=('Segoe UI', 8, 'bold'), padx=10, pady=3,
-                                    cursor='hand2')
-        self.btn_lang_ru.pack(side='left')
-        self.btn_lang_en = tk.Label(langwrap, text='EN', bg=C2, fg=DIM,
-                                    font=('Segoe UI', 8, 'bold'), padx=10, pady=3,
-                                    cursor='hand2')
+        self.btn_lang_ru = FlatBtn(langwrap, 'RU', lambda: self._set_lang('ru'),
+                                   bg=ACC, fg=BG, hbg=ACC, hfg=BG,
+                                   font=('Segoe UI', 8, 'bold'), padx=10, pady=3)
+        self.btn_lang_ru.pack(side='left', padx=(0, 3))
+        self.btn_lang_en = FlatBtn(langwrap, 'EN', lambda: self._set_lang('en'),
+                                   bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                                   font=('Segoe UI', 8, 'bold'), padx=10, pady=3)
         self.btn_lang_en.pack(side='left')
-        self.btn_lang_ru.bind('<Button-1>', lambda _: self._set_lang('ru'))
-        self.btn_lang_en.bind('<Button-1>', lambda _: self._set_lang('en'))
 
         hdr = tk.Frame(self.root, bg=C1, pady=14)
         hdr.pack(fill='x')
@@ -1093,11 +1219,11 @@ class App:
             return
         self.lang = lang
         if lang == 'ru':
-            self.btn_lang_ru.config(bg=ACC, fg=BG)
-            self.btn_lang_en.config(bg=C2, fg=DIM)
+            self.btn_lang_ru.recolor(ACC, BG, hbg=ACC)
+            self.btn_lang_en.recolor(C2, DIM, hbg=BRD)
         else:
-            self.btn_lang_en.config(bg=ACC, fg=BG)
-            self.btn_lang_ru.config(bg=C2, fg=DIM)
+            self.btn_lang_en.recolor(ACC, BG, hbg=ACC)
+            self.btn_lang_ru.recolor(C2, DIM, hbg=BRD)
 
         if self.lbl_missing:
             self.lbl_missing.config(text=self._missing_text())

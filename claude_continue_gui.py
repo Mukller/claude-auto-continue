@@ -55,6 +55,127 @@ BG, C1, C2 = "#0d1117", "#161b22", "#21262d"
 ACC, TXT, DIM = "#58a6ff", "#e6edf3", "#8b949e"
 SUC, ERR, WARN, BRD = "#3fb950", "#f85149", "#e3b341", "#30363d"
 
+# ── Переводы интерфейса (меню/кнопки/статусы) ────────────────────────────────
+# Движок (find_claude_windows/run_cycle и т.п.) логирует диагностику только
+# на русском — переключатель распространяется на меню приложения, не на
+# внутренний технический лог.
+I18N = {
+    'ru': {
+        'missing': '⚠ Не хватает: {deps}\npip install {installs}',
+        'ring_idle': 'Не запущено',
+        'ring_waiting': 'Ждём {time}',
+        'ring_firing': 'Нажимаем…',
+        'ring_done': 'Готово×{n}',
+        'ring_fail': 'Не найдено',
+        'trigger_at': 'Нажать в:',
+        'now_btn': '↻ Сейчас',
+        'start_btn': '▶   СТАРТ',
+        'stop_btn': '⏹   СТОП',
+        'watch_label': 'Наблюдение — каждые',
+        'sec': 'сек',
+        'find_btn': '↻  Найти',
+        'app_not_found': '⚠ Claude Desktop не найден. Открой приложение и нажми «Найти».',
+        'app_found_chats': '✓ {title}  —  чатов в сайдбаре: {n}',
+        'app_found_no_sidebar': '✓ {title}  —  сайдбар не обнаружен, работаем с текущим видом',
+        'switch_first': 'Переключаться на первые',
+        'chats_word': 'чатов',
+        'more_chats': '  … ещё {n}',
+        'per_chat': 'В каждом чате:',
+        'try_again_desc': ' — найти и нажать кнопку (ошибка лимита сервера)',
+        'continue_desc': ' — нажать Enter (продолжить сессию, кнопки не нужно)',
+        'check_now_btn': '🔍  Проверить сейчас',
+        'fallback_title': 'Резервный вариант (если авто-поиск не найдёт кнопку)',
+        'accuracy': 'Точность',
+        'log_title': 'Лог',
+        'clear_btn': '✕ очистить',
+        'badge_sidebar': 'Сайдбар',
+        'badge_uia': 'UIA-поиск',
+        'badge_template': 'Шаблон (резерв)',
+        'tpl_not_set': 'не задан',
+        'tpl_not_set_optional': 'не задан (необязательно)',
+        'tpl_read_error': 'ошибка чтения',
+        'capture_btn': '📷 Захватить',
+        'log_stopped': 'Остановлено.',
+        'log_started': 'Запущено → {time}',
+        'log_no_uia': '⚠ uiautomation не установлен: pip install uiautomation',
+        'log_time_search': 'Время! Ищу окно и чаты…',
+        'log_attempt': 'Попытка {n}/3:',
+        'log_success': '✓  Успех — обработано {n} чат(ов)!',
+        'log_fail': '✗  Ничего не сделано. Проверь, что Claude Desktop открыт.',
+        'log_watch': 'Наблюдение каждые {n}с.',
+        'log_now': 'Ищу и нажимаю прямо сейчас…',
+        'log_test': 'Тестовый поиск кнопки Try again (без переключения чатов, без Enter)…',
+        'log_no_app': 'Claude Desktop не найден.',
+        'log_btn_found': '✓ Кнопка "Try again" найдена на экране в области ({x}, {y})',
+        'log_btn_not_found': 'Кнопка "Try again" не найдена в текущем виде окна '
+                             '(это нормально, если нет активной ошибки лимита).',
+        'log_cont_note': 'Continue включён: при СТАРТ/Сейчас в каждом чате '
+                         'будет нажат Enter независимо от результата поиска выше.',
+        'log_capture_cancelled': 'Захват отменён.',
+        'log_capture_saved': '✓ Шаблон "{label}" сохранён ({w}×{h})',
+        'log_capture_error': 'Ошибка сохранения шаблона: {e}',
+        'log_no_pillow': 'Pillow не установлен — захват недоступен.',
+        'capture_hint': 'Выдели рамкой кнопку  •  Esc — отмена',
+    },
+    'en': {
+        'missing': '⚠ Missing: {deps}\npip install {installs}',
+        'ring_idle': 'Not started',
+        'ring_waiting': 'Waiting for {time}',
+        'ring_firing': 'Triggering…',
+        'ring_done': 'Done×{n}',
+        'ring_fail': 'Not found',
+        'trigger_at': 'Trigger at:',
+        'now_btn': '↻ Now',
+        'start_btn': '▶   START',
+        'stop_btn': '⏹   STOP',
+        'watch_label': 'Watch mode — every',
+        'sec': 'sec',
+        'find_btn': '↻  Find',
+        'app_not_found': '⚠ Claude Desktop not found. Open the app and click "Find".',
+        'app_found_chats': '✓ {title}  —  chats in sidebar: {n}',
+        'app_found_no_sidebar': '✓ {title}  —  sidebar not detected, using current view',
+        'switch_first': 'Switch to the first',
+        'chats_word': 'chats',
+        'more_chats': '  … {n} more',
+        'per_chat': 'For each chat:',
+        'try_again_desc': ' — find and click the button (server rate-limit error)',
+        'continue_desc': ' — press Enter (resume session, no button needed)',
+        'check_now_btn': '🔍  Check now',
+        'fallback_title': 'Fallback option (if auto-search can\'t find the button)',
+        'accuracy': 'Accuracy',
+        'log_title': 'Log',
+        'clear_btn': '✕ clear',
+        'badge_sidebar': 'Sidebar',
+        'badge_uia': 'UIA search',
+        'badge_template': 'Template (fallback)',
+        'tpl_not_set': 'not set',
+        'tpl_not_set_optional': 'not set (optional)',
+        'tpl_read_error': 'read error',
+        'capture_btn': '📷 Capture',
+        'log_stopped': 'Stopped.',
+        'log_started': 'Started → {time}',
+        'log_no_uia': '⚠ uiautomation not installed: pip install uiautomation',
+        'log_time_search': 'Time\'s up! Looking for window and chats…',
+        'log_attempt': 'Attempt {n}/3:',
+        'log_success': '✓  Success — processed {n} chat(s)!',
+        'log_fail': '✗  Nothing done. Check that Claude Desktop is open.',
+        'log_watch': 'Watching every {n}s.',
+        'log_now': 'Searching and clicking right now…',
+        'log_test': 'Test search for the Try again button (no chat switching, no Enter)…',
+        'log_no_app': 'Claude Desktop not found.',
+        'log_btn_found': '✓ "Try again" button found on screen at ({x}, {y})',
+        'log_btn_not_found': '"Try again" button not found in the current view '
+                             '(this is normal if there\'s no active rate-limit error).',
+        'log_cont_note': 'Continue is enabled: on START/Now, Enter will be pressed '
+                         'in each chat regardless of the search result above.',
+        'log_capture_cancelled': 'Capture cancelled.',
+        'log_capture_saved': '✓ Template "{label}" saved ({w}×{h})',
+        'log_capture_error': 'Error saving template: {e}',
+        'log_no_pillow': 'Pillow not installed — capture unavailable.',
+        'capture_hint': 'Drag a box around the button  •  Esc — cancel',
+    },
+}
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 TPL_DIR = os.path.join(APP_DIR, 'templates')
 os.makedirs(TPL_DIR, exist_ok=True)
@@ -498,7 +619,7 @@ def run_cycle(n: int, search_try_again: bool, auto_continue: bool, confidence: f
 # ══════════════════════════════════════════════════════════════════════════════
 
 class RegionCapture:
-    def __init__(self, root: tk.Tk, on_done):
+    def __init__(self, root: tk.Tk, on_done, hint_text='Drag a box around the button  •  Esc — cancel'):
         self.root = root
         self.on_done = on_done
         self.start = None
@@ -515,7 +636,7 @@ class RegionCapture:
         self.canvas.pack(fill='both', expand=True)
         self.canvas.create_text(
             self.top.winfo_screenwidth() // 2, 40,
-            text='Выдели рамкой кнопку  •  Esc — отмена',
+            text=hint_text,
             fill='white', font=('Segoe UI', 14, 'bold'))
 
         self.canvas.bind('<ButtonPress-1>', self._down)
@@ -581,6 +702,9 @@ class RingTimer(tk.Canvas):
 
 
 class Spinner(tk.Frame):
+    """+/- кнопки, а число — редактируемое поле: клик и ввод цифр напрямую,
+    Enter или клик мимо (потеря фокуса) подтверждает и обрезает по диапазону."""
+
     def __init__(self, parent, lo=0, hi=23, val=0, on_change=None, big=True, **kw):
         super().__init__(parent, bg=C1, **kw)
         self._lo, self._hi, self._v = lo, hi, val
@@ -597,10 +721,29 @@ class Spinner(tk.Frame):
             return b
 
         btn('−', self._dec).pack(side='left')
-        tk.Label(self, textvariable=self._sv, bg=C2, fg=TXT,
-                 font=('Segoe UI Mono', fs, 'bold'), width=2, padx=px, pady=3
-                 ).pack(side='left', padx=2)
+
+        self._entry = tk.Entry(self, textvariable=self._sv, bg=C2, fg=TXT,
+                               font=('Segoe UI Mono', fs, 'bold'), width=2,
+                               justify='center', relief='flat', bd=0,
+                               insertbackground=TXT, highlightthickness=1,
+                               highlightbackground=C2, highlightcolor=ACC,
+                               cursor='xterm')
+        self._entry.pack(side='left', padx=2, ipady=3)
+        self._entry.bind('<FocusIn>', lambda e: self._entry.select_range(0, 'end'))
+        self._entry.bind('<Return>', lambda e: (self._commit(), self.focus_set()))
+        self._entry.bind('<FocusOut>', lambda e: self._commit())
+        self._entry.bind('<Up>', lambda e: self._inc())
+        self._entry.bind('<Down>', lambda e: self._dec())
+
         btn('+', self._inc).pack(side='left')
+
+    def _commit(self):
+        try:
+            v = int(self._sv.get().strip() or self._v)
+        except ValueError:
+            v = self._v
+        self.set(v)
+        if self._cb: self._cb(self._v)
 
     def _inc(self):
         self._v = self._lo if self._v >= self._hi else self._v + 1
@@ -640,10 +783,14 @@ class Badge(tk.Frame):
                          highlightthickness=1, highlightbackground=BRD, **kw)
         self._dot = tk.Label(self, text='●', bg=C1, fg=DIM, font=('Segoe UI', 9))
         self._dot.pack(side='left')
-        tk.Label(self, text=name, bg=C1, fg=DIM, font=('Segoe UI', 8)).pack(side='left', padx=(4, 0))
+        self._name_lbl = tk.Label(self, text=name, bg=C1, fg=DIM, font=('Segoe UI', 8))
+        self._name_lbl.pack(side='left', padx=(4, 0))
 
     def set(self, state):
         self._dot.config(fg=self.COLORS.get(state, DIM))
+
+    def set_name(self, name):
+        self._name_lbl.config(text=name)
 
 
 class TemplateRow(tk.Frame):
@@ -663,11 +810,13 @@ class TemplateRow(tk.Frame):
         info.pack(side='left', fill='x', expand=True)
         tk.Label(info, text=self.tpl['label'], bg=C1, fg=TXT,
                  font=('Segoe UI', 9, 'bold')).pack(anchor='w')
-        self.lbl_status = tk.Label(info, text='не задан', bg=C1, fg=DIM, font=('Segoe UI', 7))
+        self.lbl_status = tk.Label(info, text=app.t('tpl_not_set'), bg=C1, fg=DIM, font=('Segoe UI', 7))
         self.lbl_status.pack(anchor='w')
 
-        FlatBtn(self, '📷 Захватить', self._capture, bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
-                font=('Segoe UI', 8), padx=10, pady=5).pack(side='right', padx=(6, 0))
+        self.btn_capture = FlatBtn(self, app.t('capture_btn'), self._capture,
+                                   bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                                   font=('Segoe UI', 8), padx=10, pady=5)
+        self.btn_capture.pack(side='right', padx=(6, 0))
         self.refresh()
 
     def refresh(self):
@@ -680,10 +829,14 @@ class TemplateRow(tk.Frame):
                 self.thumb.config(image=self._photo, width=48, height=28)
                 self.lbl_status.config(text=f'{img.width}×{img.height} px  ✓', fg=SUC)
             except Exception:
-                self.lbl_status.config(text='ошибка чтения', fg=ERR)
+                self.lbl_status.config(text=self.app.t('tpl_read_error'), fg=ERR)
         else:
             self.thumb.config(image='', width=6, height=2)
-            self.lbl_status.config(text='не задан (необязательно)', fg=DIM)
+            self.lbl_status.config(text=self.app.t('tpl_not_set_optional'), fg=DIM)
+
+    def retranslate(self):
+        self.btn_capture.config(text=self.app.t('capture_btn'))
+        self.refresh()
 
     def _capture(self):
         self.app.capture_template(self.key, self.refresh)
@@ -693,7 +846,7 @@ class TemplateRow(tk.Frame):
 #  ГЛАВНОЕ ПРИЛОЖЕНИЕ
 # ══════════════════════════════════════════════════════════════════════════════
 
-BADGE_NAMES = ['Сайдбар', 'UIA-поиск', 'Шаблон (резерв)']
+BADGE_KEYS = ['badge_sidebar', 'badge_uia', 'badge_template']
 
 
 class App:
@@ -701,19 +854,25 @@ class App:
         self.root = root
         root.title('Claude Code Auto-Continue')
         root.configure(bg=BG)
-        root.geometry('480x900')
-        root.minsize(440, 820)
+        root.geometry('480x940')
+        root.minsize(440, 860)
 
+        self.lang = 'ru'
         self._running  = False
         self._stop_evt = threading.Event()
         self._target   = None
         self._total_s  = 1.0
         self._chats_preview = []
+        self._last_windows = []
 
         self._check_deps()
         self._build()
         self._tick()
         self._scan_now()
+
+    def t(self, key, **kw):
+        s = I18N[self.lang][key]
+        return s.format(**kw) if kw else s
 
     def _check_deps(self):
         missing = []
@@ -725,6 +884,22 @@ class App:
     # ── UI ──────────────────────────────────────────────────────────────────
 
     def _build(self):
+        # ── Переключатель языка (самый верх) ──
+        langbar = tk.Frame(self.root, bg=BG, pady=6)
+        langbar.pack(fill='x')
+        langwrap = tk.Frame(langbar, bg=BG)
+        langwrap.pack(side='right', padx=22)
+        self.btn_lang_ru = tk.Label(langwrap, text='RU', bg=ACC, fg=BG,
+                                    font=('Segoe UI', 8, 'bold'), padx=10, pady=3,
+                                    cursor='hand2')
+        self.btn_lang_ru.pack(side='left')
+        self.btn_lang_en = tk.Label(langwrap, text='EN', bg=C2, fg=DIM,
+                                    font=('Segoe UI', 8, 'bold'), padx=10, pady=3,
+                                    cursor='hand2')
+        self.btn_lang_en.pack(side='left')
+        self.btn_lang_ru.bind('<Button-1>', lambda _: self._set_lang('ru'))
+        self.btn_lang_en.bind('<Button-1>', lambda _: self._set_lang('en'))
+
         hdr = tk.Frame(self.root, bg=C1, pady=14)
         hdr.pack(fill='x')
         tk.Label(hdr, text='⚡', bg=C1, fg=ACC, font=('Segoe UI', 16)).pack(side='left', padx=(22, 0))
@@ -735,12 +910,15 @@ class App:
         body = tk.Frame(self.root, bg=BG, padx=24)
         body.pack(fill='both', expand=True)
 
+        self.warn_frame = None
+        self.lbl_missing = None
         if self._missing:
-            warn = tk.Frame(body, bg='#3d2f0a', padx=14, pady=10)
-            warn.pack(fill='x', pady=(14, 0))
-            tk.Label(warn, text=f'⚠ Не хватает: {", ".join(self._missing)}\n'
-                                 f'pip install {" ".join(self._missing)}',
-                     bg='#3d2f0a', fg=WARN, font=('Segoe UI', 8), justify='left').pack(anchor='w')
+            self.warn_frame = tk.Frame(body, bg='#3d2f0a', padx=14, pady=10)
+            self.warn_frame.pack(fill='x', pady=(14, 0))
+            self.lbl_missing = tk.Label(
+                self.warn_frame, text=self._missing_text(), bg='#3d2f0a', fg=WARN,
+                font=('Segoe UI', 8), justify='left')
+            self.lbl_missing.pack(anchor='w')
 
         tk.Frame(body, bg=BG, height=16).pack()
         self.ring = RingTimer(body)
@@ -751,8 +929,9 @@ class App:
         tc = tk.Frame(body, bg=C1, padx=18, pady=14,
                       highlightthickness=1, highlightbackground=BRD)
         tc.pack(fill='x')
-        tk.Label(tc, text='Нажать в:', bg=C1, fg=DIM, font=('Segoe UI', 8, 'bold')
-                 ).pack(anchor='w', pady=(0, 8))
+        self.lbl_trigger_at = tk.Label(tc, text=self.t('trigger_at'), bg=C1, fg=DIM,
+                                       font=('Segoe UI', 8, 'bold'))
+        self.lbl_trigger_at.pack(anchor='w', pady=(0, 8))
         trow = tk.Frame(tc, bg=C1)
         trow.pack()
         self.sp_h = Spinner(trow, lo=0, hi=23, val=5)
@@ -761,11 +940,13 @@ class App:
                  ).pack(side='left', padx=10)
         self.sp_m = Spinner(trow, lo=0, hi=59, val=0)
         self.sp_m.pack(side='left')
-        FlatBtn(trow, '↻ Сейчас', self._click_now, bg=BG, fg=DIM, hbg=C2, hfg=TXT,
-                font=('Segoe UI', 9), padx=12, pady=8).pack(side='left', padx=(18, 0))
+        self.btn_now = FlatBtn(trow, self.t('now_btn'), self._click_now,
+                               bg=BG, fg=DIM, hbg=C2, hfg=TXT,
+                               font=('Segoe UI', 9), padx=12, pady=8)
+        self.btn_now.pack(side='left', padx=(18, 0))
 
         tk.Frame(body, bg=BG, height=12).pack()
-        self.main_btn = FlatBtn(body, '▶   СТАРТ', self._toggle, bg=ACC, fg=BG,
+        self.main_btn = FlatBtn(body, self.t('start_btn'), self._toggle, bg=ACC, fg=BG,
                                 hbg='#79b8ff', hfg=BG,
                                 font=('Segoe UI', 11, 'bold'), padx=20, pady=12)
         self.main_btn.pack(fill='x')
@@ -774,15 +955,17 @@ class App:
         opts = tk.Frame(body, bg=BG)
         opts.pack(fill='x')
         self.v_watch = tk.BooleanVar(value=False)
-        tk.Checkbutton(opts, text='Наблюдение — каждые', variable=self.v_watch,
-                       bg=BG, fg=DIM, selectcolor=C2, activebackground=BG,
-                       activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2'
-                       ).pack(side='left')
+        self.chk_watch = tk.Checkbutton(
+            opts, text=self.t('watch_label'), variable=self.v_watch,
+            bg=BG, fg=DIM, selectcolor=C2, activebackground=BG,
+            activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2')
+        self.chk_watch.pack(side='left')
         self.v_interval = tk.StringVar(value='30')
         tk.Spinbox(opts, from_=5, to=600, textvariable=self.v_interval, width=3,
                    bg=C2, fg=TXT, relief='flat', bd=0, font=('Segoe UI', 9),
                    buttonbackground=C2, insertbackground=TXT).pack(side='left', padx=6)
-        tk.Label(opts, text='сек', bg=BG, fg=DIM, font=('Segoe UI', 9)).pack(side='left')
+        self.lbl_sec = tk.Label(opts, text=self.t('sec'), bg=BG, fg=DIM, font=('Segoe UI', 9))
+        self.lbl_sec.pack(side='left')
 
         # ── Карточка: приложение Claude + чаты ──
         tk.Frame(body, bg=BG, height=10).pack()
@@ -794,8 +977,10 @@ class App:
         wh.pack(fill='x')
         tk.Label(wh, text='Claude Desktop', bg=C1, fg=DIM,
                  font=('Segoe UI', 8, 'bold')).pack(side='left')
-        FlatBtn(wh, '↻  Найти', self._scan_now, bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
-                font=('Segoe UI', 8), padx=10, pady=4).pack(side='right')
+        self.btn_find = FlatBtn(wh, self.t('find_btn'), self._scan_now,
+                                bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                                font=('Segoe UI', 8), padx=10, pady=4)
+        self.btn_find.pack(side='right')
 
         self.lbl_app_status = tk.Label(wc, text='…', bg=C1, fg=DIM,
                                        font=('Segoe UI', 8), justify='left', anchor='w')
@@ -803,11 +988,15 @@ class App:
 
         nr = tk.Frame(wc, bg=C1)
         nr.pack(fill='x', pady=(10, 0))
-        tk.Label(nr, text='Переключаться на первые', bg=C1, fg=DIM,
-                 font=('Segoe UI', 9)).pack(side='left')
-        self.sp_n = Spinner(nr, lo=1, hi=20, val=3, big=False)
+        self.lbl_switch_first = tk.Label(nr, text=self.t('switch_first'), bg=C1, fg=DIM,
+                                         font=('Segoe UI', 9))
+        self.lbl_switch_first.pack(side='left')
+        self.sp_n = Spinner(nr, lo=1, hi=20, val=3, big=False,
+                            on_change=lambda _: self._refresh_chat_list())
         self.sp_n.pack(side='left', padx=(8, 8))
-        tk.Label(nr, text='чатов', bg=C1, fg=DIM, font=('Segoe UI', 9)).pack(side='left')
+        self.lbl_chats_word = tk.Label(nr, text=self.t('chats_word'), bg=C1, fg=DIM,
+                                       font=('Segoe UI', 9))
+        self.lbl_chats_word.pack(side='left')
 
         self.chat_list = tk.Frame(wc, bg=C1)
         self.chat_list.pack(fill='x', pady=(8, 0))
@@ -815,8 +1004,9 @@ class App:
         tk.Frame(wc, bg=BRD, height=1).pack(fill='x', pady=(10, 8))
         brow = tk.Frame(wc, bg=C1)
         brow.pack(fill='x')
-        tk.Label(brow, text='В каждом чате:', bg=C1, fg=DIM, font=('Segoe UI', 8, 'bold')
-                 ).pack(anchor='w')
+        self.lbl_per_chat = tk.Label(brow, text=self.t('per_chat'), bg=C1, fg=DIM,
+                                     font=('Segoe UI', 8, 'bold'))
+        self.lbl_per_chat.pack(anchor='w')
 
         self.v_btn_try  = tk.BooleanVar(value=True)
         row_try = tk.Frame(wc, bg=C1)
@@ -825,8 +1015,9 @@ class App:
                        bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
                        activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2'
                        ).pack(side='left')
-        tk.Label(row_try, text=' — найти и нажать кнопку (ошибка лимита сервера)',
-                 bg=C1, fg=DIM, font=('Segoe UI', 7)).pack(side='left')
+        self.lbl_try_desc = tk.Label(row_try, text=self.t('try_again_desc'),
+                                     bg=C1, fg=DIM, font=('Segoe UI', 7))
+        self.lbl_try_desc.pack(side='left')
 
         self.v_btn_cont = tk.BooleanVar(value=True)
         row_cont = tk.Frame(wc, bg=C1)
@@ -835,20 +1026,23 @@ class App:
                        bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
                        activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2'
                        ).pack(side='left')
-        tk.Label(row_cont, text=' — нажать Enter (продолжить сессию, кнопки не нужно)',
-                 bg=C1, fg=DIM, font=('Segoe UI', 7)).pack(side='left')
+        self.lbl_cont_desc = tk.Label(row_cont, text=self.t('continue_desc'),
+                                      bg=C1, fg=DIM, font=('Segoe UI', 7))
+        self.lbl_cont_desc.pack(side='left')
 
-        FlatBtn(wc, '🔍  Проверить сейчас', self._test_find, bg=C2, fg=DIM,
-                hbg=BRD, hfg=TXT, font=('Segoe UI', 8), padx=10, pady=6
-                ).pack(fill='x', pady=(10, 0))
+        self.btn_check_now = FlatBtn(wc, self.t('check_now_btn'), self._test_find,
+                                     bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                                     font=('Segoe UI', 8), padx=10, pady=6)
+        self.btn_check_now.pack(fill='x', pady=(10, 0))
 
         # ── Резервный вариант: шаблоны ──
         tk.Frame(body, bg=BG, height=10).pack()
         tc2 = tk.Frame(body, bg=C1, padx=18, pady=12,
                        highlightthickness=1, highlightbackground=BRD)
         tc2.pack(fill='x')
-        tk.Label(tc2, text='Резервный вариант (если авто-поиск не найдёт кнопку)',
-                 bg=C1, fg=DIM, font=('Segoe UI', 8, 'bold')).pack(anchor='w', pady=(0, 8))
+        self.lbl_fallback_title = tk.Label(tc2, text=self.t('fallback_title'), bg=C1, fg=DIM,
+                                           font=('Segoe UI', 8, 'bold'))
+        self.lbl_fallback_title.pack(anchor='w', pady=(0, 8))
         self.tpl_rows = {}
         for key in TEMPLATES:
             row = TemplateRow(tc2, key, self)
@@ -856,7 +1050,8 @@ class App:
             self.tpl_rows[key] = row
         cr = tk.Frame(tc2, bg=C1)
         cr.pack(fill='x', pady=(8, 0))
-        tk.Label(cr, text='Точность', bg=C1, fg=DIM, font=('Segoe UI', 9)).pack(side='left')
+        self.lbl_accuracy = tk.Label(cr, text=self.t('accuracy'), bg=C1, fg=DIM, font=('Segoe UI', 9))
+        self.lbl_accuracy.pack(side='left')
         self.v_conf = tk.DoubleVar(value=0.82)
         tk.Scale(cr, from_=0.5, to=0.99, resolution=0.01, orient='horizontal',
                  variable=self.v_conf, bg=C1, fg=DIM, troughcolor=C2,
@@ -867,22 +1062,66 @@ class App:
         tk.Frame(body, bg=BG, height=10).pack()
         br = tk.Frame(body, bg=BG)
         br.pack(anchor='w')
-        self.badges = [Badge(br, n) for n in BADGE_NAMES]
+        self.badges = [Badge(br, self.t(k)) for k in BADGE_KEYS]
         for b in self.badges: b.pack(side='left', padx=(0, 8))
 
         # ── Лог ──
         tk.Frame(body, bg=BRD, height=1).pack(fill='x', pady=(12, 0))
         lh = tk.Frame(body, bg=BG)
         lh.pack(fill='x', pady=(5, 4))
-        tk.Label(lh, text='Лог', bg=BG, fg=DIM, font=('Segoe UI', 8, 'bold')).pack(side='left')
-        FlatBtn(lh, '✕ очистить', self._clear_log, bg=BG, fg=DIM, hfg=TXT,
-                font=('Segoe UI', 8)).pack(side='right')
+        self.lbl_log_title = tk.Label(lh, text=self.t('log_title'), bg=BG, fg=DIM,
+                                      font=('Segoe UI', 8, 'bold'))
+        self.lbl_log_title.pack(side='left')
+        self.btn_clear = FlatBtn(lh, self.t('clear_btn'), self._clear_log,
+                                 bg=BG, fg=DIM, hfg=TXT, font=('Segoe UI', 8))
+        self.btn_clear.pack(side='right')
         self.log = tk.Text(body, bg=C1, fg=TXT, font=('Consolas', 8), relief='flat', bd=0,
                             state='disabled', wrap='word', insertbackground=TXT)
         self.log.pack(fill='both', expand=True, pady=(0, 20))
         for tag, fg in [('success', SUC), ('error', ERR), ('warn', WARN),
                         ('dim', DIM), ('accent', ACC)]:
             self.log.tag_config(tag, foreground=fg)
+
+    def _missing_text(self) -> str:
+        return self.t('missing', deps=", ".join(self._missing),
+                      installs=" ".join(self._missing))
+
+    # ── Язык ────────────────────────────────────────────────────────────────
+
+    def _set_lang(self, lang: str):
+        if lang == self.lang:
+            return
+        self.lang = lang
+        if lang == 'ru':
+            self.btn_lang_ru.config(bg=ACC, fg=BG)
+            self.btn_lang_en.config(bg=C2, fg=DIM)
+        else:
+            self.btn_lang_en.config(bg=ACC, fg=BG)
+            self.btn_lang_ru.config(bg=C2, fg=DIM)
+
+        if self.lbl_missing:
+            self.lbl_missing.config(text=self._missing_text())
+        self.lbl_trigger_at.config(text=self.t('trigger_at'))
+        self.btn_now.config(text=self.t('now_btn'))
+        self.main_btn.config(text=self.t('stop_btn') if self._running else self.t('start_btn'))
+        self.chk_watch.config(text=self.t('watch_label'))
+        self.lbl_sec.config(text=self.t('sec'))
+        self.btn_find.config(text=self.t('find_btn'))
+        self.lbl_switch_first.config(text=self.t('switch_first'))
+        self.lbl_chats_word.config(text=self.t('chats_word'))
+        self.lbl_per_chat.config(text=self.t('per_chat'))
+        self.lbl_try_desc.config(text=self.t('try_again_desc'))
+        self.lbl_cont_desc.config(text=self.t('continue_desc'))
+        self.btn_check_now.config(text=self.t('check_now_btn'))
+        self.lbl_fallback_title.config(text=self.t('fallback_title'))
+        self.lbl_accuracy.config(text=self.t('accuracy'))
+        self.lbl_log_title.config(text=self.t('log_title'))
+        self.btn_clear.config(text=self.t('clear_btn'))
+        for b, k in zip(self.badges, BADGE_KEYS):
+            b.set_name(self.t(k))
+        for row in self.tpl_rows.values():
+            row.retranslate()
+        self._update_scan(self._last_windows, self._chats_preview)
 
     # ── Сканирование окна и чатов ────────────────────────────────────────────
 
@@ -896,20 +1135,18 @@ class App:
         threading.Thread(target=run, daemon=True).start()
 
     def _update_scan(self, windows, chats):
+        self._last_windows = windows
         self._chats_preview = chats
         if not windows:
-            self.lbl_app_status.config(
-                text='⚠ Claude Desktop не найден. Открой приложение и нажми «Найти».',
-                fg=WARN)
+            self.lbl_app_status.config(text=self.t('app_not_found'), fg=WARN)
         else:
             title = (windows[0]['title'] or 'Claude')[:40]
             if chats:
                 self.lbl_app_status.config(
-                    text=f'✓ {title}  —  чатов в сайдбаре: {len(chats)}', fg=SUC)
+                    text=self.t('app_found_chats', title=title, n=len(chats)), fg=SUC)
             else:
                 self.lbl_app_status.config(
-                    text=f'✓ {title}  —  сайдбар не обнаружен, работаем с текущим видом',
-                    fg=WARN)
+                    text=self.t('app_found_no_sidebar', title=title), fg=WARN)
         self._refresh_chat_list()
 
     def _refresh_chat_list(self):
@@ -929,15 +1166,15 @@ class App:
             tk.Label(row, text=f'  {name}', bg=C1, fg=TXT if active else DIM,
                      font=('Segoe UI', 8)).pack(side='left')
         if len(chats) > 8:
-            tk.Label(self.chat_list, text=f'  … ещё {len(chats)-8}', bg=C1, fg=DIM,
-                     font=('Segoe UI', 7)).pack(anchor='w')
+            tk.Label(self.chat_list, text=self.t('more_chats', n=len(chats)-8),
+                     bg=C1, fg=DIM, font=('Segoe UI', 7)).pack(anchor='w')
 
 
     # ── Захват шаблона ──────────────────────────────────────────────────────
 
     def capture_template(self, key: str, on_refreshed):
         if ImageGrab is None:
-            self._log('Pillow не установлен — захват недоступен.', 'error')
+            self._log(self.t('log_no_pillow'), 'error')
             return
         self.root.iconify()
         self.root.after(350, lambda: self._start_capture(key, on_refreshed))
@@ -946,17 +1183,17 @@ class App:
         def done(bbox):
             self.root.deiconify()
             if not bbox:
-                self._log('Захват отменён.', 'dim')
+                self._log(self.t('log_capture_cancelled'), 'dim')
                 return
             try:
                 img = ImageGrab.grab(bbox=bbox)
                 img.save(TEMPLATES[key]['file'])
-                self._log(f'✓ Шаблон "{TEMPLATES[key]["label"]}" сохранён '
-                          f'({img.width}×{img.height})', 'success')
+                self._log(self.t('log_capture_saved', label=TEMPLATES[key]['label'],
+                                 w=img.width, h=img.height), 'success')
                 on_refreshed()
             except Exception as e:
-                self._log(f'Ошибка сохранения шаблона: {e}', 'error')
-        RegionCapture(self.root, done)
+                self._log(self.t('log_capture_error', e=e), 'error')
+        RegionCapture(self.root, done, hint_text=self.t('capture_hint'))
 
     # ── Лог ─────────────────────────────────────────────────────────────────
 
@@ -987,11 +1224,11 @@ class App:
                 pct = max(0, min(100, (1 - rem / self._total_s) * 100))
                 h, m, s = int(rem//3600), int((rem%3600)//60), int(rem%60)
                 self.ring.draw(pct, f'{h:02d}:{m:02d}:{s:02d}',
-                               f'Ждём {self._target.strftime("%H:%M")}', ACC)
+                               self.t('ring_waiting', time=self._target.strftime("%H:%M")), ACC)
             else:
-                self.ring.draw(100, '⏰', 'Нажимаем…', WARN)
+                self.ring.draw(100, '⏰', self.t('ring_firing'), WARN)
         elif not self._running:
-            self.ring.draw(0, '--:--:--', 'Не запущено', DIM)
+            self.ring.draw(0, '--:--:--', self.t('ring_idle'), DIM)
         self.root.after(100, self._tick)
 
     # ── Управление ──────────────────────────────────────────────────────────
@@ -1008,25 +1245,25 @@ class App:
             self._stop_evt.set()
             self._running = False
             self.main_btn.recolor(ACC, BG, '#79b8ff')
-            self.main_btn.config(text='▶   СТАРТ')
+            self.main_btn.config(text=self.t('start_btn'))
             self.lbl_hint.config(text='')
-            self._log('Остановлено.', 'dim')
+            self._log(self.t('log_stopped'), 'dim')
             for b in self.badges: b.set('idle')
         else:
             self._start()
 
     def _start(self):
         if not HAS_UIA:
-            self._log('⚠ uiautomation не установлен: pip install uiautomation', 'error')
+            self._log(self.t('log_no_uia'), 'error')
             return
         self._stop_evt.clear()
         self._running = True
         self._target  = self._get_target()
         self._total_s = max(1.0, (self._target - datetime.datetime.now()).total_seconds())
         self.main_btn.recolor(ERR, '#fff', '#ff6b6b')
-        self.main_btn.config(text='⏹   СТОП')
+        self.main_btn.config(text=self.t('stop_btn'))
         self.lbl_hint.config(text=f'→ {self._target.strftime("%d.%m.%Y  %H:%M")}')
-        self._log(f'Запущено → {self._target.strftime("%d.%m %H:%M")}', 'accent')
+        self._log(self.t('log_started', time=self._target.strftime("%d.%m %H:%M")), 'accent')
         threading.Thread(target=self._worker, daemon=True).start()
 
     def _worker(self):
@@ -1036,7 +1273,7 @@ class App:
             self._stop_evt.wait(min(0.3, rem))
         if self._stop_evt.is_set(): return
 
-        self._slog('Время! Ищу окно и чаты…', 'warn')
+        self._slog(self.t('log_time_search'), 'warn')
         n = self.sp_n.get()
         try_again, auto_cont = self.v_btn_try.get(), self.v_btn_cont.get()
         conf = self.v_conf.get()
@@ -1044,21 +1281,21 @@ class App:
         ok = 0
         for attempt in range(1, 4):
             if self._stop_evt.is_set(): return
-            self._slog(f'Попытка {attempt}/3:', 'dim')
+            self._slog(self.t('log_attempt', n=attempt), 'dim')
             ok = run_cycle(n, try_again, auto_cont, conf, self._slog, self._badge)
             if ok: break
             if attempt < 3: self._stop_evt.wait(5)
 
         if ok:
-            self.root.after(0, lambda c=ok: self.ring.draw(100, '✓', f'Готово×{c}', SUC))
-            self._slog(f'✓  Успех — обработано {ok} чат(ов)!', 'success')
+            self.root.after(0, lambda c=ok: self.ring.draw(100, '✓', self.t('ring_done', n=c), SUC))
+            self._slog(self.t('log_success', n=ok), 'success')
         else:
-            self.root.after(0, lambda: self.ring.draw(100, '✗', 'Не найдено', ERR))
-            self._slog('✗  Ничего не сделано. Проверь, что Claude Desktop открыт.', 'error')
+            self.root.after(0, lambda: self.ring.draw(100, '✗', self.t('ring_fail'), ERR))
+            self._slog(self.t('log_fail'), 'error')
 
         if self.v_watch.get() and not self._stop_evt.is_set():
             iv = int(self.v_interval.get() or 30)
-            self._slog(f'Наблюдение каждые {iv}с.', 'dim')
+            self._slog(self.t('log_watch', n=iv), 'dim')
             while not self._stop_evt.is_set():
                 self._stop_evt.wait(iv)
                 if self._stop_evt.is_set(): break
@@ -1069,12 +1306,12 @@ class App:
             self._running = False
             self.root.after(0, lambda: [
                 self.main_btn.recolor(ACC, BG, '#79b8ff'),
-                self.main_btn.config(text='▶   СТАРТ'),
+                self.main_btn.config(text=self.t('start_btn')),
                 self.lbl_hint.config(text=''),
             ])
 
     def _click_now(self):
-        self._log('Ищу и нажимаю прямо сейчас…', 'accent')
+        self._log(self.t('log_now'), 'accent')
         n = self.sp_n.get()
         try_again, auto_cont, conf = self.v_btn_try.get(), self.v_btn_cont.get(), self.v_conf.get()
         threading.Thread(
@@ -1083,25 +1320,22 @@ class App:
         ).start()
 
     def _test_find(self):
-        self._log('Тестовый поиск кнопки Try again (без переключения чатов, без Enter)…', 'accent')
+        self._log(self.t('log_test'), 'accent')
         def run():
             windows = find_claude_windows(self._slog)
             if not windows:
-                self._slog('Claude Desktop не найден.', 'error')
+                self._slog(self.t('log_no_app'), 'error')
                 return
             self._badge(1, 'trying')
             _, rect = find_button_uia(windows[0]['ctrl'], TRY_AGAIN_LABELS, self._slog)
             if rect:
                 self._badge(1, 'ok')
-                self._slog(f'✓ Кнопка "Try again" найдена на экране в области '
-                          f'({int(rect.left)}, {int(rect.top)})', 'success')
+                self._slog(self.t('log_btn_found', x=int(rect.left), y=int(rect.top)), 'success')
             else:
                 self._badge(1, 'idle')
-                self._slog('Кнопка "Try again" не найдена в текущем виде окна '
-                          '(это нормально, если нет активной ошибки лимита).', 'dim')
+                self._slog(self.t('log_btn_not_found'), 'dim')
             if self.v_btn_cont.get():
-                self._slog('Continue включён: при СТАРТ/Сейчас в каждом чате '
-                          'будет нажат Enter независимо от результата поиска выше.', 'dim')
+                self._slog(self.t('log_cont_note'), 'dim')
         threading.Thread(target=run, daemon=True).start()
 
 

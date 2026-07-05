@@ -1016,8 +1016,8 @@ class App:
         self.root = root
         root.title('Claude Code Auto-Continue')
         root.configure(bg=BG)
-        root.geometry('480x940')
-        root.minsize(440, 860)
+        root.geometry('480x880')
+        root.minsize(440, 620)
 
         self.lang = 'ru'
         self._running  = False
@@ -1051,11 +1051,11 @@ class App:
     # ── UI ──────────────────────────────────────────────────────────────────
 
     def _build(self):
-        # ── Переключатель языка (самый верх) ──
-        langbar = tk.Frame(self.root, bg=BG, pady=6)
-        langbar.pack(fill='x')
+        # ── Фиксированная шапка ─────────────────────────────────────────────
+        langbar = tk.Frame(self.root, bg=BG, pady=5)
+        langbar.pack(fill='x', side='top')
         langwrap = tk.Frame(langbar, bg=BG)
-        langwrap.pack(side='right', padx=22)
+        langwrap.pack(side='right', padx=18)
         self.btn_lang_ru = FlatBtn(langwrap, 'RU', lambda: self._set_lang('ru'),
                                    bg=ACC, fg=BG, hbg=ACC, hfg=BG,
                                    font=('Segoe UI', 8, 'bold'), padx=10, pady=3)
@@ -1065,16 +1065,56 @@ class App:
                                    font=('Segoe UI', 8, 'bold'), padx=10, pady=3)
         self.btn_lang_en.pack(side='left')
 
-        hdr = tk.Frame(self.root, bg=C1, pady=14)
-        hdr.pack(fill='x')
-        tk.Label(hdr, text='⚡', bg=C1, fg=ACC, font=('Segoe UI', 16)).pack(side='left', padx=(22, 0))
+        hdr = tk.Frame(self.root, bg=C1, pady=12)
+        hdr.pack(fill='x', side='top')
+        tk.Label(hdr, text='⚡', bg=C1, fg=ACC, font=('Segoe UI', 16)).pack(side='left', padx=(20, 0))
         tk.Label(hdr, text='Claude Code  Auto-Continue', bg=C1, fg=TXT,
                  font=('Segoe UI', 12, 'bold')).pack(side='left', padx=10)
-        tk.Frame(self.root, bg=BRD, height=1).pack(fill='x')
+        tk.Frame(self.root, bg=ACC, height=2).pack(fill='x', side='top')
 
-        body = tk.Frame(self.root, bg=BG, padx=24)
-        body.pack(fill='both', expand=True)
+        # ── Фиксированный лог внизу ─────────────────────────────────────────
+        log_area = tk.Frame(self.root, bg=BG)
+        log_area.pack(fill='both', side='bottom', expand=False)
+        tk.Frame(log_area, bg=BRD, height=1).pack(fill='x')
+        lh = tk.Frame(log_area, bg=BG, padx=20)
+        lh.pack(fill='x', pady=(5, 3))
+        self.lbl_log_title = tk.Label(lh, text=self.t('log_title'), bg=BG, fg=DIM,
+                                      font=('Segoe UI', 8, 'bold'))
+        self.lbl_log_title.pack(side='left')
+        self.btn_clear = FlatBtn(lh, self.t('clear_btn'), self._clear_log,
+                                 bg=BG, fg=DIM, hfg=TXT, font=('Segoe UI', 8))
+        self.btn_clear.pack(side='right')
+        self.log = tk.Text(log_area, bg=C1, fg=TXT, font=('Consolas', 8),
+                            relief='flat', bd=0, state='disabled', wrap='word',
+                            insertbackground=TXT, height=7, padx=12, pady=6)
+        self.log.pack(fill='both', expand=True)
+        for tag, fg in [('success', SUC), ('error', ERR), ('warn', WARN),
+                        ('dim', DIM), ('accent', ACC)]:
+            self.log.tag_config(tag, foreground=fg)
 
+        # ── Прокручиваемая средняя часть ────────────────────────────────────
+        scroll_outer = tk.Frame(self.root, bg=BG)
+        scroll_outer.pack(fill='both', expand=True, side='top')
+
+        self._main_sb = tk.Scrollbar(scroll_outer, orient='vertical',
+                                      bg=C2, troughcolor=BG, activebackground=BRD)
+        self._main_sb.pack(side='right', fill='y')
+        self._main_canvas = tk.Canvas(scroll_outer, bg=BG, highlightthickness=0,
+                                       yscrollcommand=self._main_sb.set)
+        self._main_canvas.pack(side='left', fill='both', expand=True)
+        self._main_sb.config(command=self._main_canvas.yview)
+
+        body = tk.Frame(self._main_canvas, bg=BG, padx=20)
+        self._body_win = self._main_canvas.create_window((0, 0), window=body, anchor='nw')
+
+        body.bind('<Configure>', lambda e: self._main_canvas.configure(
+            scrollregion=self._main_canvas.bbox('all')))
+        self._main_canvas.bind('<Configure>', lambda e: self._main_canvas.itemconfig(
+            self._body_win, width=e.width))
+
+        self.root.bind_all('<MouseWheel>', self._dispatch_scroll)
+
+        # ── Предупреждение о зависимостях ───────────────────────────────────
         self.warn_frame = None
         self.lbl_missing = None
         if self._missing:
@@ -1085,19 +1125,21 @@ class App:
                 font=('Segoe UI', 8), justify='left')
             self.lbl_missing.pack(anchor='w')
 
-        tk.Frame(body, bg=BG, height=16).pack()
+        # ── Кольцевой таймер ────────────────────────────────────────────────
+        tk.Frame(body, bg=BG, height=14).pack()
         self.ring = RingTimer(body)
         self.ring.pack()
         self.lbl_hint = tk.Label(body, text='', bg=BG, fg=DIM, font=('Segoe UI', 8))
-        self.lbl_hint.pack(pady=(3, 12))
+        self.lbl_hint.pack(pady=(3, 10))
 
-        tc = tk.Frame(body, bg=C1, padx=18, pady=14,
-                      highlightthickness=1, highlightbackground=BRD)
-        tc.pack(fill='x')
-        self.lbl_trigger_at = tk.Label(tc, text=self.t('trigger_at'), bg=C1, fg=DIM,
-                                       font=('Segoe UI', 8, 'bold'))
+        # ── Карточка: одиночный запуск ───────────────────────────────────────
+        self._tc = tk.Frame(body, bg=C1, padx=18, pady=12,
+                            highlightthickness=1, highlightbackground=BRD)
+        self._tc.pack(fill='x')
+        self.lbl_trigger_at = tk.Label(self._tc, text=self.t('trigger_at'), bg=C1, fg=DIM,
+                                       font=('Segoe UI', 9, 'bold'))
         self.lbl_trigger_at.pack(anchor='w', pady=(0, 8))
-        trow = tk.Frame(tc, bg=C1)
+        trow = tk.Frame(self._tc, bg=C1)
         trow.pack()
         self.sp_h = Spinner(trow, lo=0, hi=23, val=5)
         self.sp_h.pack(side='left')
@@ -1110,13 +1152,13 @@ class App:
                                font=('Segoe UI', 9), padx=12, pady=8)
         self.btn_now.pack(side='left', padx=(18, 0))
 
-        tk.Frame(body, bg=BG, height=12).pack()
+        tk.Frame(body, bg=BG, height=10).pack()
         self.main_btn = FlatBtn(body, self.t('start_btn'), self._toggle, bg=ACC, fg=BG,
                                 hbg='#79b8ff', hfg=BG,
                                 font=('Segoe UI', 11, 'bold'), padx=20, pady=12)
         self.main_btn.pack(fill='x')
 
-        tk.Frame(body, bg=BG, height=10).pack()
+        tk.Frame(body, bg=BG, height=8).pack()
         opts = tk.Frame(body, bg=BG)
         opts.pack(fill='x')
         self.v_watch = tk.BooleanVar(value=False)
@@ -1132,16 +1174,16 @@ class App:
         self.lbl_sec = tk.Label(opts, text=self.t('sec'), bg=BG, fg=DIM, font=('Segoe UI', 9))
         self.lbl_sec.pack(side='left')
 
-        # ── Карточка: план запусков (несколько времён/циклов) ──
+        # ── Карточка: план запусков ──────────────────────────────────────────
         tk.Frame(body, bg=BG, height=10).pack()
-        pc = tk.Frame(body, bg=C1, padx=18, pady=14,
-                      highlightthickness=1, highlightbackground=BRD)
-        pc.pack(fill='x')
-        self.lbl_plan_title = tk.Label(pc, text=self.t('plan_title'), bg=C1, fg=DIM,
-                                       font=('Segoe UI', 8, 'bold'))
+        self._pc = tk.Frame(body, bg=C1, padx=18, pady=12,
+                            highlightthickness=1, highlightbackground=BRD)
+        self._pc.pack(fill='x')
+        self.lbl_plan_title = tk.Label(self._pc, text=self.t('plan_title'), bg=C1, fg=DIM,
+                                       font=('Segoe UI', 9, 'bold'))
         self.lbl_plan_title.pack(anchor='w', pady=(0, 8))
 
-        prow = tk.Frame(pc, bg=C1)
+        prow = tk.Frame(self._pc, bg=C1)
         prow.pack(fill='x')
         self.sp_plan_h = Spinner(prow, lo=0, hi=23, val=5, big=False)
         self.sp_plan_h.pack(side='left')
@@ -1154,36 +1196,36 @@ class App:
                                     font=('Segoe UI', 9), padx=12, pady=6)
         self.btn_plan_add.pack(side='left', padx=(12, 0))
 
-        self.plan_list_frame = tk.Frame(pc, bg=C1)
+        self.plan_list_frame = tk.Frame(self._pc, bg=C1)
         self.plan_list_frame.pack(fill='x', pady=(8, 0))
 
         self.v_plan_repeat = tk.BooleanVar(value=True)
         self.chk_plan_repeat = tk.Checkbutton(
-            pc, text=self.t('plan_repeat'), variable=self.v_plan_repeat,
+            self._pc, text=self.t('plan_repeat'), variable=self.v_plan_repeat,
             bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
             activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2')
         self.chk_plan_repeat.pack(anchor='w', pady=(8, 0))
 
-        self.lbl_plan_status = tk.Label(pc, text=self.t('plan_status_idle'),
+        self.lbl_plan_status = tk.Label(self._pc, text=self.t('plan_status_idle'),
                                         bg=C1, fg=DIM, font=('Segoe UI', 8),
                                         justify='left', anchor='w')
-        self.lbl_plan_status.pack(fill='x', pady=(8, 6))
+        self.lbl_plan_status.pack(fill='x', pady=(6, 4))
 
-        self.btn_plan_start = FlatBtn(pc, self.t('plan_start_btn'), self._toggle_plan,
+        self.btn_plan_start = FlatBtn(self._pc, self.t('plan_start_btn'), self._toggle_plan,
                                       bg=C2, fg=TXT, hbg=BRD, hfg=TXT,
                                       font=('Segoe UI', 10, 'bold'), padx=16, pady=10)
         self.btn_plan_start.pack(fill='x')
 
-        # ── Карточка: приложение Claude + чаты ──
+        # ── Карточка: Claude Desktop + чаты ─────────────────────────────────
         tk.Frame(body, bg=BG, height=10).pack()
-        wc = tk.Frame(body, bg=C1, padx=18, pady=14,
+        wc = tk.Frame(body, bg=C1, padx=18, pady=12,
                       highlightthickness=1, highlightbackground=BRD)
         wc.pack(fill='x')
 
         wh = tk.Frame(wc, bg=C1)
         wh.pack(fill='x')
         tk.Label(wh, text='Claude Desktop', bg=C1, fg=DIM,
-                 font=('Segoe UI', 8, 'bold')).pack(side='left')
+                 font=('Segoe UI', 9, 'bold')).pack(side='left')
         self.btn_find = FlatBtn(wh, self.t('find_btn'), self._scan_now,
                                 bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
                                 font=('Segoe UI', 8), padx=10, pady=4)
@@ -1205,26 +1247,39 @@ class App:
                                        font=('Segoe UI', 9))
         self.lbl_chats_word.pack(side='left')
 
+        # Сворачиваемый список чатов
         self._chat_collapsed = False
         chat_hdr = tk.Frame(wc, bg=C1, cursor='hand2')
-        chat_hdr.pack(fill='x', pady=(8, 0))
-        self.chat_arrow = tk.Label(chat_hdr, text='▾', bg=C1, fg=DIM,
-                                   font=('Segoe UI', 8), cursor='hand2')
+        chat_hdr.pack(fill='x', pady=(10, 0))
+        self.chat_arrow = tk.Label(chat_hdr, text='▾', bg=C1, fg=ACC,
+                                   font=('Segoe UI', 9), cursor='hand2')
         self.chat_arrow.pack(side='left')
         self.lbl_chat_list_title = tk.Label(chat_hdr, text=self.t('chat_list_title'),
-                                            bg=C1, fg=DIM, font=('Segoe UI', 8), cursor='hand2')
+                                            bg=C1, fg=DIM, font=('Segoe UI', 8),
+                                            cursor='hand2')
         self.lbl_chat_list_title.pack(side='left', padx=(4, 0))
+
+        def _chdr_enter(_e):
+            chat_hdr.config(bg=C2)
+            self.chat_arrow.config(bg=C2)
+            self.lbl_chat_list_title.config(bg=C2)
+
+        def _chdr_leave(_e):
+            chat_hdr.config(bg=C1)
+            self.chat_arrow.config(bg=C1)
+            self.lbl_chat_list_title.config(bg=C1)
+
         for w in (chat_hdr, self.chat_arrow, self.lbl_chat_list_title):
             w.bind('<Button-1>', lambda _e: self._toggle_chat_list())
+            w.bind('<Enter>', _chdr_enter)
+            w.bind('<Leave>', _chdr_leave)
 
-        # Разделитель фиксирует место — сворачиваемый блок пере-пакуется
-        # именно перед ним, чтобы порядок не съезжал при повторном pack().
         self._sep_after_chats = tk.Frame(wc, bg=BRD, height=1)
-        self._sep_after_chats.pack(fill='x', pady=(10, 8))
+        self._sep_after_chats.pack(fill='x', pady=(8, 6))
 
         self.chat_list_outer = tk.Frame(wc, bg=C1)
         self.chat_list_outer.pack(fill='x', pady=(4, 0), before=self._sep_after_chats)
-        self._chat_canvas = tk.Canvas(self.chat_list_outer, bg=C1, height=170,
+        self._chat_canvas = tk.Canvas(self.chat_list_outer, bg=C1, height=90,
                                       highlightthickness=0)
         self._chat_scroll = tk.Scrollbar(self.chat_list_outer, orient='vertical',
                                          command=self._chat_canvas.yview)
@@ -1239,18 +1294,16 @@ class App:
             scrollregion=self._chat_canvas.bbox('all')))
         self._chat_canvas.bind('<Configure>', lambda e: self._chat_canvas.itemconfig(
             self._chat_canvas_win, width=e.width))
-        self._chat_canvas.bind(
-            '<Enter>', lambda e: self._chat_canvas.bind_all('<MouseWheel>', self._on_chat_scroll))
-        self._chat_canvas.bind('<Leave>', lambda e: self._chat_canvas.unbind_all('<MouseWheel>'))
+
         brow = tk.Frame(wc, bg=C1)
-        brow.pack(fill='x')
+        brow.pack(fill='x', pady=(4, 0))
         self.lbl_per_chat = tk.Label(brow, text=self.t('per_chat'), bg=C1, fg=DIM,
                                      font=('Segoe UI', 8, 'bold'))
         self.lbl_per_chat.pack(anchor='w')
 
         self.v_btn_try  = tk.BooleanVar(value=True)
         row_try = tk.Frame(wc, bg=C1)
-        row_try.pack(fill='x', pady=(6, 0))
+        row_try.pack(fill='x', pady=(5, 0))
         tk.Checkbutton(row_try, text='Try again', variable=self.v_btn_try,
                        bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
                        activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2'
@@ -1261,7 +1314,7 @@ class App:
 
         self.v_btn_cont = tk.BooleanVar(value=True)
         row_cont = tk.Frame(wc, bg=C1)
-        row_cont.pack(fill='x', pady=(4, 0))
+        row_cont.pack(fill='x', pady=(3, 0))
         tk.Checkbutton(row_cont, text='Continue', variable=self.v_btn_cont,
                        bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
                        activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2'
@@ -1275,7 +1328,7 @@ class App:
                                      font=('Segoe UI', 8), padx=10, pady=6)
         self.btn_check_now.pack(fill='x', pady=(10, 0))
 
-        # ── Резервный вариант: шаблоны ──
+        # ── Резервный вариант: шаблоны ───────────────────────────────────────
         tk.Frame(body, bg=BG, height=10).pack()
         tc2 = tk.Frame(body, bg=C1, padx=18, pady=12,
                        highlightthickness=1, highlightbackground=BRD)
@@ -1298,29 +1351,13 @@ class App:
                  highlightthickness=0, bd=0, length=140, font=('Segoe UI', 7)
                  ).pack(side='left', padx=8)
 
-        # ── Бейджи ──
-        tk.Frame(body, bg=BG, height=10).pack()
+        # ── Бейджи ───────────────────────────────────────────────────────────
+        tk.Frame(body, bg=BG, height=8).pack()
         br = tk.Frame(body, bg=BG)
         br.pack(anchor='w')
         self.badges = [Badge(br, self.t(k)) for k in BADGE_KEYS]
         for b in self.badges: b.pack(side='left', padx=(0, 8))
-
-        # ── Лог ──
-        tk.Frame(body, bg=BRD, height=1).pack(fill='x', pady=(12, 0))
-        lh = tk.Frame(body, bg=BG)
-        lh.pack(fill='x', pady=(5, 4))
-        self.lbl_log_title = tk.Label(lh, text=self.t('log_title'), bg=BG, fg=DIM,
-                                      font=('Segoe UI', 8, 'bold'))
-        self.lbl_log_title.pack(side='left')
-        self.btn_clear = FlatBtn(lh, self.t('clear_btn'), self._clear_log,
-                                 bg=BG, fg=DIM, hfg=TXT, font=('Segoe UI', 8))
-        self.btn_clear.pack(side='right')
-        self.log = tk.Text(body, bg=C1, fg=TXT, font=('Consolas', 8), relief='flat', bd=0,
-                            state='disabled', wrap='word', insertbackground=TXT)
-        self.log.pack(fill='both', expand=True, pady=(0, 20))
-        for tag, fg in [('success', SUC), ('error', ERR), ('warn', WARN),
-                        ('dim', DIM), ('accent', ACC)]:
-            self.log.tag_config(tag, foreground=fg)
+        tk.Frame(body, bg=BG, height=12).pack()
 
     def _missing_text(self) -> str:
         return self.t('missing', deps=", ".join(self._missing),
@@ -1373,6 +1410,21 @@ class App:
 
     # ── Сворачиваемый / прокручиваемый список чатов ──────────────────────────
 
+    def _dispatch_scroll(self, event):
+        w = event.widget
+        while w is not None:
+            if w is getattr(self, '_chat_canvas', None):
+                self._chat_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+                return
+            if isinstance(w, tk.Text):
+                return  # text widget handles it natively
+            try:
+                w = w.master
+            except AttributeError:
+                break
+        if hasattr(self, '_main_canvas'):
+            self._main_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+
     def _toggle_chat_list(self):
         self._chat_collapsed = not self._chat_collapsed
         if self._chat_collapsed:
@@ -1381,9 +1433,9 @@ class App:
         else:
             self.chat_list_outer.pack(fill='x', pady=(4, 0), before=self._sep_after_chats)
             self.chat_arrow.config(text='▾')
-
-    def _on_chat_scroll(self, event):
-        self._chat_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        if hasattr(self, '_main_canvas'):
+            self.root.after(50, lambda: self._main_canvas.configure(
+                scrollregion=self._main_canvas.bbox('all')))
 
     # ── Сканирование окна и чатов ────────────────────────────────────────────
 
@@ -1418,8 +1470,6 @@ class App:
         n = self.sp_n.get()
         if not chats:
             return
-        # Список теперь прокручиваемый — показываем все найденные чаты,
-        # а не только первые 8 (см. Canvas+Scrollbar вокруг self.chat_list).
         for i, c in enumerate(chats):
             active = i < n
             row = tk.Frame(self.chat_list, bg=C1)
@@ -1429,6 +1479,9 @@ class App:
             name = c['name'][:42] + ('…' if len(c['name']) > 42 else '')
             tk.Label(row, text=f'  {name}', bg=C1, fg=TXT if active else DIM,
                      font=('Segoe UI', 8)).pack(side='left')
+        row_h = 19
+        new_h = min(len(chats) * row_h + 4, 5 * row_h + 4)
+        self._chat_canvas.configure(height=new_h)
         self._chat_canvas.yview_moveto(0)
 
 
@@ -1511,6 +1564,7 @@ class App:
             self.lbl_hint.config(text='')
             self._log(self.t('log_stopped'), 'dim')
             for b in self.badges: b.set('idle')
+            self._tc.configure(highlightbackground=BRD)
         else:
             self._start()
 
@@ -1529,6 +1583,7 @@ class App:
         self.main_btn.config(text=self.t('stop_btn'))
         self.lbl_hint.config(text=f'→ {self._target.strftime("%d.%m.%Y  %H:%M")}')
         self._log(self.t('log_started', time=self._target.strftime("%d.%m %H:%M")), 'accent')
+        self._tc.configure(highlightbackground=ACC)
         threading.Thread(target=self._worker, daemon=True).start()
 
     def _worker(self):
@@ -1573,6 +1628,7 @@ class App:
                 self.main_btn.recolor(ACC, BG, '#79b8ff'),
                 self.main_btn.config(text=self.t('start_btn')),
                 self.lbl_hint.config(text=''),
+                self._tc.configure(highlightbackground=BRD),
             ])
 
     def _click_now(self):
@@ -1624,16 +1680,19 @@ class App:
             w.destroy()
         if not self._plan:
             tk.Label(self.plan_list_frame, text=self.t('plan_empty'),
-                     bg=C1, fg=DIM, font=('Segoe UI', 7)).pack(anchor='w')
+                     bg=C1, fg=DIM, font=('Segoe UI', 8)).pack(anchor='w')
             return
+        chips_row = tk.Frame(self.plan_list_frame, bg=C1)
+        chips_row.pack(anchor='w', fill='x')
         for hm in self._plan:
             h, m = hm
-            row = tk.Frame(self.plan_list_frame, bg=C2, padx=8, pady=3)
-            row.pack(anchor='w', pady=2)
-            tk.Label(row, text=f'{h:02d}:{m:02d}', bg=C2, fg=TXT,
+            chip = tk.Frame(chips_row, bg=C2, padx=8, pady=4,
+                            highlightthickness=1, highlightbackground=BRD)
+            chip.pack(side='left', padx=(0, 6), pady=2)
+            tk.Label(chip, text=f'{h:02d}:{m:02d}', bg=C2, fg=TXT,
                      font=('Segoe UI Mono', 9, 'bold')).pack(side='left')
-            rm = tk.Label(row, text=' ✕', bg=C2, fg=DIM, font=('Segoe UI', 8), cursor='hand2')
-            rm.pack(side='left', padx=(6, 0))
+            rm = tk.Label(chip, text=' ✕', bg=C2, fg=DIM, font=('Segoe UI', 8), cursor='hand2')
+            rm.pack(side='left')
             rm.bind('<Button-1>', lambda _e, hm=hm: self._plan_remove(hm))
             rm.bind('<Enter>', lambda _e, w=rm: w.config(fg=ERR))
             rm.bind('<Leave>', lambda _e, w=rm: w.config(fg=DIM))
@@ -1673,6 +1732,7 @@ class App:
             self.btn_plan_start.config(text=self.t('plan_start_btn'))
             self._log(self.t('log_plan_stopped'), 'dim')
             self._update_plan_status()
+            self._pc.configure(highlightbackground=BRD)
         else:
             self._plan_start()
 
@@ -1692,6 +1752,7 @@ class App:
         self.btn_plan_start.recolor(ERR, '#fff', '#ff6b6b')
         self.btn_plan_start.config(text=self.t('plan_stop_btn'))
         self._log(self.t('log_plan_started', n=len(self._plan)), 'accent')
+        self._pc.configure(highlightbackground=ACC)
         threading.Thread(target=self._plan_worker, daemon=True).start()
 
     def _plan_worker(self):
@@ -1732,6 +1793,7 @@ class App:
                 self.btn_plan_start.recolor(C2, TXT, hbg=BRD),
                 self.btn_plan_start.config(text=self.t('plan_start_btn')),
                 self._update_plan_status(),
+                self._pc.configure(highlightbackground=BRD),
             ])
 
 

@@ -6,6 +6,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.4.0]
+### Changed
+- **Scrollable main body** — all cards now live inside a Canvas+Scrollbar scroll area;
+  the log panel is pinned to the window bottom and never scrolls away.
+- **Plan chips (horizontal)** — scheduled times are displayed as compact inline chips
+  (`05:00 ×`, `08:00 ×` …) instead of vertical rows; multiple times fit side by side.
+- **Dynamic chat list height** — the chat canvas automatically sizes to show up to 5 rows
+  without wasted blank space; taller lists show a scrollbar.
+- **Smart scroll dispatch** — a single `bind_all` handler routes the mouse wheel to the
+  correct scroll target: chat canvas when hovering the chat list, native scroll for the
+  log text widget, main canvas everywhere else.
+- **Active card border highlight** — the trigger card glows with the accent colour while
+  START is running; the plan card glows while the plan is active.
+- **Chat list header hover** — the "▾ Список чатов" header row gets a subtle C2 background
+  on mouse-over to indicate it is clickable.
+- **Section titles** — label font bumped from size 8 to 9 for better readability.
+- **Header accent line** — the separator below the app title bar is now 2 px in the accent
+  colour instead of a hairline grey rule.
+
 ## [3.3.0]
 ### Added
 - **Scrollable chat list** — the sidebar chat list is now a Canvas + Scrollbar widget;

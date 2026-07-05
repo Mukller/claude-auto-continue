@@ -20,8 +20,10 @@ The button is located via **UI Automation text search**, with no manual template
 ## Features
 
 - **Schedule** — fire at an exact time (e.g. when limits reset overnight)
+- **Scheduled plan (cycles)** — add multiple trigger times (05:00, 08:00, 17:00…), each fires the full cycle independently. Optional daily repeat, or one-shot entries that remove themselves after firing.
 - **Auto button search** — no manual template capture; finds "Try again" by text via UI Automation
 - **Switch between chats in the sidebar** — visits the first N chats in the list and processes each one (sorted top-to-bottom, same order as the UI)
+- **Scrollable and collapsible chat list** — all detected chats are shown in a scrollable area; click the "Chat list" header to collapse or expand the block
 - **Two independent per-chat actions:**
   - `Try again` — finds and clicks the real button (server temporarily rate-limiting requests)
   - `Continue` — presses **Enter** after switching into the chat, regardless of whether any button was found (after a limit, Claude Code usually just waits for input with no button at all)

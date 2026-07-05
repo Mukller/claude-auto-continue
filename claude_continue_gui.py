@@ -116,6 +116,23 @@ I18N = {
         'log_capture_error': 'Ошибка сохранения шаблона: {e}',
         'log_no_pillow': 'Pillow не установлен — захват недоступен.',
         'capture_hint': 'Выдели рамкой кнопку  •  Esc — отмена',
+        'chat_list_title': 'Список чатов',
+        'plan_title': 'План запусков (циклы)',
+        'plan_add_btn': '+ Добавить',
+        'plan_empty': 'Время в плане не добавлено',
+        'plan_repeat': 'Повторять ежедневно',
+        'plan_start_btn': '▶  Запустить план',
+        'plan_stop_btn': '⏹  Остановить план',
+        'plan_status_idle': 'План не запущен',
+        'plan_status_next': 'Следующий запуск плана: {time} (через {left})',
+        'plan_left_fmt': '{h}ч {m}м',
+        'plan_left_fmt_m': '{m}м',
+        'log_plan_started': 'План запущен, времён в списке: {n}',
+        'log_plan_stopped': 'План остановлен.',
+        'log_plan_trigger': 'План: время {time} — ищу окно и чаты…',
+        'log_plan_done': 'План выполнен — все разовые запуски отработали.',
+        'log_plan_already_running': '⚠ Нельзя запустить план — уже идёт одиночный запуск (СТАРТ).',
+        'log_single_blocked_by_plan': '⚠ Нельзя нажать СТАРТ — сейчас работает план.',
     },
     'en': {
         'missing': '⚠ Missing: {deps}\npip install {installs}',
@@ -173,6 +190,23 @@ I18N = {
         'log_capture_error': 'Error saving template: {e}',
         'log_no_pillow': 'Pillow not installed — capture unavailable.',
         'capture_hint': 'Drag a box around the button  •  Esc — cancel',
+        'chat_list_title': 'Chat list',
+        'plan_title': 'Scheduled plan (cycles)',
+        'plan_add_btn': '+ Add',
+        'plan_empty': 'No times added to the plan yet',
+        'plan_repeat': 'Repeat daily',
+        'plan_start_btn': '▶  Start plan',
+        'plan_stop_btn': '⏹  Stop plan',
+        'plan_status_idle': 'Plan not running',
+        'plan_status_next': 'Next plan trigger: {time} (in {left})',
+        'plan_left_fmt': '{h}h {m}m',
+        'plan_left_fmt_m': '{m}m',
+        'log_plan_started': 'Plan started, {n} time(s) queued',
+        'log_plan_stopped': 'Plan stopped.',
+        'log_plan_trigger': 'Plan: time {time} — looking for window and chats…',
+        'log_plan_done': 'Plan finished — all one-off triggers ran.',
+        'log_plan_already_running': '⚠ Can\'t start the plan — a single run (START) is already active.',
+        'log_single_blocked_by_plan': '⚠ Can\'t click START — the plan is currently running.',
     },
 }
 
@@ -993,6 +1027,11 @@ class App:
         self._chats_preview = []
         self._last_windows = []
 
+        self._plan = []                    # список [(h, m), ...], растущий по кнопке "+ Добавить"
+        self._plan_running = False
+        self._plan_stop_evt = threading.Event()
+        self._plan_next_target = None
+
         self._check_deps()
         self._build()
         self._tick()
@@ -1093,6 +1132,48 @@ class App:
         self.lbl_sec = tk.Label(opts, text=self.t('sec'), bg=BG, fg=DIM, font=('Segoe UI', 9))
         self.lbl_sec.pack(side='left')
 
+        # ── Карточка: план запусков (несколько времён/циклов) ──
+        tk.Frame(body, bg=BG, height=10).pack()
+        pc = tk.Frame(body, bg=C1, padx=18, pady=14,
+                      highlightthickness=1, highlightbackground=BRD)
+        pc.pack(fill='x')
+        self.lbl_plan_title = tk.Label(pc, text=self.t('plan_title'), bg=C1, fg=DIM,
+                                       font=('Segoe UI', 8, 'bold'))
+        self.lbl_plan_title.pack(anchor='w', pady=(0, 8))
+
+        prow = tk.Frame(pc, bg=C1)
+        prow.pack(fill='x')
+        self.sp_plan_h = Spinner(prow, lo=0, hi=23, val=5, big=False)
+        self.sp_plan_h.pack(side='left')
+        tk.Label(prow, text=':', bg=C1, fg=TXT, font=('Segoe UI Mono', 14, 'bold')
+                 ).pack(side='left', padx=6)
+        self.sp_plan_m = Spinner(prow, lo=0, hi=59, val=0, big=False)
+        self.sp_plan_m.pack(side='left')
+        self.btn_plan_add = FlatBtn(prow, self.t('plan_add_btn'), self._plan_add,
+                                    bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                                    font=('Segoe UI', 9), padx=12, pady=6)
+        self.btn_plan_add.pack(side='left', padx=(12, 0))
+
+        self.plan_list_frame = tk.Frame(pc, bg=C1)
+        self.plan_list_frame.pack(fill='x', pady=(8, 0))
+
+        self.v_plan_repeat = tk.BooleanVar(value=True)
+        self.chk_plan_repeat = tk.Checkbutton(
+            pc, text=self.t('plan_repeat'), variable=self.v_plan_repeat,
+            bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
+            activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2')
+        self.chk_plan_repeat.pack(anchor='w', pady=(8, 0))
+
+        self.lbl_plan_status = tk.Label(pc, text=self.t('plan_status_idle'),
+                                        bg=C1, fg=DIM, font=('Segoe UI', 8),
+                                        justify='left', anchor='w')
+        self.lbl_plan_status.pack(fill='x', pady=(8, 6))
+
+        self.btn_plan_start = FlatBtn(pc, self.t('plan_start_btn'), self._toggle_plan,
+                                      bg=C2, fg=TXT, hbg=BRD, hfg=TXT,
+                                      font=('Segoe UI', 10, 'bold'), padx=16, pady=10)
+        self.btn_plan_start.pack(fill='x')
+
         # ── Карточка: приложение Claude + чаты ──
         tk.Frame(body, bg=BG, height=10).pack()
         wc = tk.Frame(body, bg=C1, padx=18, pady=14,
@@ -1124,10 +1205,43 @@ class App:
                                        font=('Segoe UI', 9))
         self.lbl_chats_word.pack(side='left')
 
-        self.chat_list = tk.Frame(wc, bg=C1)
-        self.chat_list.pack(fill='x', pady=(8, 0))
+        self._chat_collapsed = False
+        chat_hdr = tk.Frame(wc, bg=C1, cursor='hand2')
+        chat_hdr.pack(fill='x', pady=(8, 0))
+        self.chat_arrow = tk.Label(chat_hdr, text='▾', bg=C1, fg=DIM,
+                                   font=('Segoe UI', 8), cursor='hand2')
+        self.chat_arrow.pack(side='left')
+        self.lbl_chat_list_title = tk.Label(chat_hdr, text=self.t('chat_list_title'),
+                                            bg=C1, fg=DIM, font=('Segoe UI', 8), cursor='hand2')
+        self.lbl_chat_list_title.pack(side='left', padx=(4, 0))
+        for w in (chat_hdr, self.chat_arrow, self.lbl_chat_list_title):
+            w.bind('<Button-1>', lambda _e: self._toggle_chat_list())
 
-        tk.Frame(wc, bg=BRD, height=1).pack(fill='x', pady=(10, 8))
+        # Разделитель фиксирует место — сворачиваемый блок пере-пакуется
+        # именно перед ним, чтобы порядок не съезжал при повторном pack().
+        self._sep_after_chats = tk.Frame(wc, bg=BRD, height=1)
+        self._sep_after_chats.pack(fill='x', pady=(10, 8))
+
+        self.chat_list_outer = tk.Frame(wc, bg=C1)
+        self.chat_list_outer.pack(fill='x', pady=(4, 0), before=self._sep_after_chats)
+        self._chat_canvas = tk.Canvas(self.chat_list_outer, bg=C1, height=170,
+                                      highlightthickness=0)
+        self._chat_scroll = tk.Scrollbar(self.chat_list_outer, orient='vertical',
+                                         command=self._chat_canvas.yview)
+        self.chat_list = tk.Frame(self._chat_canvas, bg=C1)
+        self._chat_canvas_win = self._chat_canvas.create_window(
+            (0, 0), window=self.chat_list, anchor='nw')
+        self._chat_canvas.configure(yscrollcommand=self._chat_scroll.set)
+        self._chat_canvas.pack(side='left', fill='both', expand=True)
+        self._chat_scroll.pack(side='right', fill='y')
+
+        self.chat_list.bind('<Configure>', lambda e: self._chat_canvas.configure(
+            scrollregion=self._chat_canvas.bbox('all')))
+        self._chat_canvas.bind('<Configure>', lambda e: self._chat_canvas.itemconfig(
+            self._chat_canvas_win, width=e.width))
+        self._chat_canvas.bind(
+            '<Enter>', lambda e: self._chat_canvas.bind_all('<MouseWheel>', self._on_chat_scroll))
+        self._chat_canvas.bind('<Leave>', lambda e: self._chat_canvas.unbind_all('<MouseWheel>'))
         brow = tk.Frame(wc, bg=C1)
         brow.pack(fill='x')
         self.lbl_per_chat = tk.Label(brow, text=self.t('per_chat'), bg=C1, fg=DIM,
@@ -1243,11 +1357,33 @@ class App:
         self.lbl_accuracy.config(text=self.t('accuracy'))
         self.lbl_log_title.config(text=self.t('log_title'))
         self.btn_clear.config(text=self.t('clear_btn'))
+        self.lbl_chat_list_title.config(text=self.t('chat_list_title'))
         for b, k in zip(self.badges, BADGE_KEYS):
             b.set_name(self.t(k))
         for row in self.tpl_rows.values():
             row.retranslate()
+        self.lbl_plan_title.config(text=self.t('plan_title'))
+        self.btn_plan_add.config(text=self.t('plan_add_btn'))
+        self.chk_plan_repeat.config(text=self.t('plan_repeat'))
+        self.btn_plan_start.config(
+            text=self.t('plan_stop_btn') if self._plan_running else self.t('plan_start_btn'))
+        self._refresh_plan_list()
+        self._update_plan_status()
         self._update_scan(self._last_windows, self._chats_preview)
+
+    # ── Сворачиваемый / прокручиваемый список чатов ──────────────────────────
+
+    def _toggle_chat_list(self):
+        self._chat_collapsed = not self._chat_collapsed
+        if self._chat_collapsed:
+            self.chat_list_outer.pack_forget()
+            self.chat_arrow.config(text='▸')
+        else:
+            self.chat_list_outer.pack(fill='x', pady=(4, 0), before=self._sep_after_chats)
+            self.chat_arrow.config(text='▾')
+
+    def _on_chat_scroll(self, event):
+        self._chat_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
 
     # ── Сканирование окна и чатов ────────────────────────────────────────────
 
@@ -1282,7 +1418,9 @@ class App:
         n = self.sp_n.get()
         if not chats:
             return
-        for i, c in enumerate(chats[:8]):
+        # Список теперь прокручиваемый — показываем все найденные чаты,
+        # а не только первые 8 (см. Canvas+Scrollbar вокруг self.chat_list).
+        for i, c in enumerate(chats):
             active = i < n
             row = tk.Frame(self.chat_list, bg=C1)
             row.pack(fill='x', pady=1)
@@ -1291,9 +1429,7 @@ class App:
             name = c['name'][:42] + ('…' if len(c['name']) > 42 else '')
             tk.Label(row, text=f'  {name}', bg=C1, fg=TXT if active else DIM,
                      font=('Segoe UI', 8)).pack(side='left')
-        if len(chats) > 8:
-            tk.Label(self.chat_list, text=self.t('more_chats', n=len(chats)-8),
-                     bg=C1, fg=DIM, font=('Segoe UI', 7)).pack(anchor='w')
+        self._chat_canvas.yview_moveto(0)
 
 
     # ── Захват шаблона ──────────────────────────────────────────────────────
@@ -1382,6 +1518,9 @@ class App:
         if not HAS_UIA:
             self._log(self.t('log_no_uia'), 'error')
             return
+        if self._plan_running:
+            self._log(self.t('log_single_blocked_by_plan'), 'error')
+            return
         self._stop_evt.clear()
         self._running = True
         self._target  = self._get_target()
@@ -1463,6 +1602,137 @@ class App:
             if self.v_btn_cont.get():
                 self._slog(self.t('log_cont_note'), 'dim')
         threading.Thread(target=run, daemon=True).start()
+
+    # ── План запусков (несколько времён/циклов) ──────────────────────────────
+
+    def _plan_add(self):
+        h, m = self.sp_plan_h.get(), self.sp_plan_m.get()
+        if (h, m) not in self._plan:
+            self._plan.append((h, m))
+            self._plan.sort()
+            self._refresh_plan_list()
+            self._update_plan_status()
+
+    def _plan_remove(self, hm):
+        if hm in self._plan:
+            self._plan.remove(hm)
+            self._refresh_plan_list()
+            self._update_plan_status()
+
+    def _refresh_plan_list(self):
+        for w in self.plan_list_frame.winfo_children():
+            w.destroy()
+        if not self._plan:
+            tk.Label(self.plan_list_frame, text=self.t('plan_empty'),
+                     bg=C1, fg=DIM, font=('Segoe UI', 7)).pack(anchor='w')
+            return
+        for hm in self._plan:
+            h, m = hm
+            row = tk.Frame(self.plan_list_frame, bg=C2, padx=8, pady=3)
+            row.pack(anchor='w', pady=2)
+            tk.Label(row, text=f'{h:02d}:{m:02d}', bg=C2, fg=TXT,
+                     font=('Segoe UI Mono', 9, 'bold')).pack(side='left')
+            rm = tk.Label(row, text=' ✕', bg=C2, fg=DIM, font=('Segoe UI', 8), cursor='hand2')
+            rm.pack(side='left', padx=(6, 0))
+            rm.bind('<Button-1>', lambda _e, hm=hm: self._plan_remove(hm))
+            rm.bind('<Enter>', lambda _e, w=rm: w.config(fg=ERR))
+            rm.bind('<Leave>', lambda _e, w=rm: w.config(fg=DIM))
+
+    def _plan_next_targets(self):
+        """Ближайшее будущее срабатывание для каждого времени плана
+        (сегодня, либо завтра, если время уже прошло)."""
+        now = datetime.datetime.now()
+        targets = []
+        for h, m in self._plan:
+            t = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if t <= now:
+                t += datetime.timedelta(days=1)
+            targets.append(t)
+        targets.sort()
+        return targets
+
+    def _update_plan_status(self):
+        if self._plan_running and self._plan_next_target:
+            rem = (self._plan_next_target - datetime.datetime.now()).total_seconds()
+            rem = max(0, rem)
+            h_left, m_left = int(rem // 3600), int((rem % 3600) // 60)
+            left = (self.t('plan_left_fmt', h=h_left, m=m_left) if h_left
+                   else self.t('plan_left_fmt_m', m=m_left))
+            self.lbl_plan_status.config(
+                text=self.t('plan_status_next',
+                           time=self._plan_next_target.strftime('%d.%m %H:%M'), left=left),
+                fg=ACC)
+        elif not self._plan_running:
+            self.lbl_plan_status.config(text=self.t('plan_status_idle'), fg=DIM)
+
+    def _toggle_plan(self):
+        if self._plan_running:
+            self._plan_stop_evt.set()
+            self._plan_running = False
+            self.btn_plan_start.recolor(C2, TXT, hbg=BRD)
+            self.btn_plan_start.config(text=self.t('plan_start_btn'))
+            self._log(self.t('log_plan_stopped'), 'dim')
+            self._update_plan_status()
+        else:
+            self._plan_start()
+
+    def _plan_start(self):
+        if not HAS_UIA:
+            self._log(self.t('log_no_uia'), 'error')
+            return
+        if not self._plan:
+            self._plan_add()
+            if not self._plan:
+                return
+        if self._running:
+            self._log(self.t('log_plan_already_running'), 'error')
+            return
+        self._plan_stop_evt.clear()
+        self._plan_running = True
+        self.btn_plan_start.recolor(ERR, '#fff', '#ff6b6b')
+        self.btn_plan_start.config(text=self.t('plan_stop_btn'))
+        self._log(self.t('log_plan_started', n=len(self._plan)), 'accent')
+        threading.Thread(target=self._plan_worker, daemon=True).start()
+
+    def _plan_worker(self):
+        while not self._plan_stop_evt.is_set():
+            targets = self._plan_next_targets()
+            if not targets:
+                break
+            next_t = targets[0]
+            self._plan_next_target = next_t
+            self.root.after(0, self._update_plan_status)
+
+            while not self._plan_stop_evt.is_set():
+                rem = (next_t - datetime.datetime.now()).total_seconds()
+                if rem <= 0: break
+                self._plan_stop_evt.wait(min(0.5, rem))
+            if self._plan_stop_evt.is_set():
+                return
+
+            self._slog(self.t('log_plan_trigger', time=next_t.strftime('%H:%M')), 'warn')
+            n = self.sp_n.get()
+            try_again, auto_cont = self.v_btn_try.get(), self.v_btn_cont.get()
+            conf = self.v_conf.get()
+            run_cycle(n, try_again, auto_cont, conf, self._slog, self._badge)
+
+            if not self.v_plan_repeat.get():
+                fired = (next_t.hour, next_t.minute)
+                if fired in self._plan:
+                    self._plan.remove(fired)
+                    self.root.after(0, self._refresh_plan_list)
+                if not self._plan:
+                    break
+
+        if not self._plan_stop_evt.is_set():
+            self._plan_running = False
+            self._plan_next_target = None
+            self._slog(self.t('log_plan_done'), 'success')
+            self.root.after(0, lambda: [
+                self.btn_plan_start.recolor(C2, TXT, hbg=BRD),
+                self.btn_plan_start.config(text=self.t('plan_start_btn')),
+                self._update_plan_status(),
+            ])
 
 
 # ══════════════════════════════════════════════════════════════════════════════

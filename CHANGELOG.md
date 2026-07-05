@@ -6,6 +6,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.3.0]
+### Added
+- **Scrollable chat list** — the sidebar chat list is now a Canvas + Scrollbar widget;
+  all detected chats are shown (no more "… N more" truncation), and the list scrolls
+  with the mouse wheel when hovered.
+- **Collapsible chat list** — clicking the "Список чатов / Chat list" header collapses
+  or expands the chat list in-place (▾ / ▸ arrow). Useful when the list is long and
+  you want a more compact window.
+- **Scheduled plan (cycles)** — a new "План запусков / Scheduled plan" card lets you
+  add multiple trigger times (e.g. 05:00, 08:00, 17:00). Each time runs the full
+  cycle independently. Optional "Repeat daily" checkbox: when checked the plan loops
+  forever; when unchecked each entry fires once and is removed. The plan button
+  (▶ Start plan / ⏹ Stop plan) is mutually exclusive with the single START button —
+  you cannot run both simultaneously. The status label shows the next upcoming trigger
+  and a live countdown.
+
 ## [3.2.0]
 ### Added
 - Time fields (hour/minute) are now editable directly — click and type

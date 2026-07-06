@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.6.0]
+### Added
+- **System tray** (`pystray`, optional) — closing the window minimizes to tray instead of
+  quitting. A toggle checkbox in the top bar switches the behavior. Double-click the tray
+  icon or use "Show" from the context menu to restore; "Exit" quits cleanly.
+- **Windows toast notifications** (`plyer`, optional) — a desktop notification fires after
+  every successful trigger cycle. A toggle checkbox is shown when `plyer` is installed.
+  Both packages degrade gracefully when not installed.
+
 ## [3.5.0]
 ### Added
 - **Settings persistence** — time, intervals, checkboxes, plan times, and trigger history are

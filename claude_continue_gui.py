@@ -54,6 +54,20 @@ except ImportError:
     auto = None
     HAS_UIA = False
 
+try:
+    import pystray
+    HAS_TRAY = True
+except ImportError:
+    pystray = None
+    HAS_TRAY = False
+
+try:
+    from plyer import notification as _plyer_notif
+    HAS_NOTIF = True
+except ImportError:
+    _plyer_notif = None
+    HAS_NOTIF = False
+
 # ── Темы ──────────────────────────────────────────────────────────────────────
 THEMES = {
     'dark':  dict(BG='#0d1117', C1='#161b22', C2='#21262d', BRD='#30363d',
@@ -160,6 +174,12 @@ I18N = {
         'history_empty': 'Срабатываний ещё не было',
         'history_ok': '✓ {n} чат(ов)',
         'history_fail': '✗ не сделано',
+        'tray_show': 'Открыть',
+        'tray_quit': 'Выход',
+        'tray_minimize': 'Свернуть в трей при закрытии',
+        'notif_title': 'Claude Auto-Continue',
+        'notif_ok': 'Успешно обработано чатов: {n}',
+        'notif_fail': 'Ни одного чата не обработано',
     },
     'en': {
         'missing': '⚠ Missing: {deps}\npip install {installs}',
@@ -247,6 +267,12 @@ I18N = {
         'history_empty': 'No triggers yet',
         'history_ok': '✓ {n} chat(s)',
         'history_fail': '✗ nothing done',
+        'tray_show': 'Show',
+        'tray_quit': 'Exit',
+        'tray_minimize': 'Minimize to tray on close',
+        'notif_title': 'Claude Auto-Continue',
+        'notif_ok': 'Successfully processed {n} chat(s)',
+        'notif_fail': 'No chats were processed',
     },
 }
 
@@ -1081,6 +1107,9 @@ class App:
         self._stat_ok = 0
         self._history: list = []   # [{ts, ok}], max 10
 
+        self._tray_icon = None     # pystray.Icon или None
+        self._tray_minimize = tk.BooleanVar(value=True)
+
         self._cfg: dict = {}       # загруженные настройки
 
         self._load_settings()
@@ -1133,6 +1162,8 @@ class App:
         self._theme = d.get('theme', 'dark')
         self._plan = [tuple(x) for x in d.get('plan', [])]
         self._history = d.get('history', [])[-10:]
+        # tray_minimize доступна только после __init__ tk.BooleanVar; обновляем позже
+        self._cfg_tray_minimize = d.get('tray_minimize', True)
 
     def _save_settings(self):
         d = {
@@ -1150,6 +1181,8 @@ class App:
             'plan_repeat': self._sgv('v_plan_repeat', True),
             'plan': list(self._plan),
             'history': self._history[-10:],
+            'tray_minimize': self._tray_minimize.get(),
+            'notif': self._sgv('v_notif', True),
         }
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -1166,8 +1199,85 @@ class App:
         except Exception: return default
 
     def _on_close(self):
+        if HAS_TRAY and self._tray_minimize.get():
+            self._minimize_to_tray()
+        else:
+            self._quit_app()
+
+    def _quit_app(self):
         self._save_settings()
+        if self._tray_icon is not None:
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
+            self._tray_icon = None
         self.root.destroy()
+
+    def _make_tray_image(self):
+        """16×16 PNG-иконка для трея — синий круг."""
+        if Image is None:
+            return None
+        img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+        try:
+            from PIL import ImageDraw
+            d = ImageDraw.Draw(img)
+            d.ellipse([4, 4, 60, 60], fill=(88, 166, 255, 255))
+            d.text((22, 18), '▶', fill=(13, 17, 23, 255))
+        except Exception:
+            pass
+        return img
+
+    def _minimize_to_tray(self):
+        if not HAS_TRAY:
+            self._quit_app()
+            return
+        self.root.withdraw()
+        if self._tray_icon is not None:
+            return  # уже в трее
+        img = self._make_tray_image()
+        if img is None:
+            self._quit_app()
+            return
+        menu = pystray.Menu(
+            pystray.MenuItem(self.t('tray_show'), self._show_from_tray, default=True),
+            pystray.MenuItem(self.t('tray_quit'), lambda _icon, _item: self._schedule_quit()),
+        )
+        icon = pystray.Icon('claude-auto-continue', img, 'Claude Auto-Continue', menu)
+        self._tray_icon = icon
+        threading.Thread(target=icon.run, daemon=True).start()
+
+    def _show_from_tray(self, _icon=None, _item=None):
+        self.root.after(0, self._restore_from_tray)
+
+    def _restore_from_tray(self):
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+        if self._tray_icon is not None:
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
+            self._tray_icon = None
+
+    def _schedule_quit(self):
+        self.root.after(0, self._quit_app)
+
+    # ── Уведомления Windows ────────────────────────────────────────────────
+
+    def _notify(self, ok: int):
+        if not HAS_NOTIF:
+            return
+        if not hasattr(self, 'v_notif') or not self.v_notif.get():
+            return
+        try:
+            title = self.t('notif_title')
+            msg = self.t('notif_ok', n=ok) if ok else self.t('notif_fail')
+            _plyer_notif.notify(title=title, message=msg,
+                                app_name='Claude Auto-Continue', timeout=5)
+        except Exception:
+            pass
 
     # ── Автозапуск Windows ─────────────────────────────────────────────────
 
@@ -1272,6 +1382,26 @@ class App:
         # ── Фиксированная шапка ─────────────────────────────────────────────
         langbar = tk.Frame(self.root, bg=BG, pady=5)
         langbar.pack(fill='x', side='top')
+
+        # ── Левая часть: чекбоксы трей / уведомления ─────────────────────
+        langleft = tk.Frame(langbar, bg=BG)
+        langleft.pack(side='left', padx=14)
+        self._tray_minimize.set(self._cfg_tray_minimize)
+        if HAS_TRAY:
+            tk.Checkbutton(langleft, text=self.t('tray_minimize'),
+                           variable=self._tray_minimize,
+                           bg=BG, fg=DIM, selectcolor=C2, activebackground=BG,
+                           activeforeground=TXT, font=('Segoe UI', 8),
+                           cursor='hand2').pack(anchor='w')
+        self.v_notif = tk.BooleanVar(value=self._cfg.get('notif', True))
+        if HAS_NOTIF:
+            tk.Checkbutton(langleft,
+                           text=('🔔 Уведомления' if self.lang == 'ru' else '🔔 Notifications'),
+                           variable=self.v_notif,
+                           bg=BG, fg=DIM, selectcolor=C2, activebackground=BG,
+                           activeforeground=TXT, font=('Segoe UI', 8),
+                           cursor='hand2').pack(anchor='w')
+
         langwrap = tk.Frame(langbar, bg=BG)
         langwrap.pack(side='right', padx=18)
         # Кнопки: тема / автозапуск / RU / EN
@@ -1897,6 +2027,7 @@ class App:
 
         self._stat_click(ok)
         self._add_history(ok)
+        self._notify(ok)
         if ok:
             self.root.after(0, lambda c=ok: self.ring.draw(100, '✓', self.t('ring_done', n=c), SUC))
             self._slog(self.t('log_success', n=ok), 'success')
@@ -1933,6 +2064,7 @@ class App:
             ok = run_cycle(indices, try_again, auto_cont, conf, self._slog, self._badge)
             self._stat_click(ok)
             self._add_history(ok)
+            self._notify(ok)
         threading.Thread(target=_run, daemon=True).start()
 
     def _test_find(self):
@@ -2073,6 +2205,7 @@ class App:
             ok = run_cycle(indices, try_again, auto_cont, conf, self._slog, self._badge)
             self._stat_click(ok)
             self._add_history(ok)
+            self._notify(ok)
 
             if not self.v_plan_repeat.get():
                 fired = (next_t.hour, next_t.minute)

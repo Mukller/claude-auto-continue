@@ -21,9 +21,13 @@ try:
 except ImportError:
     _fatal("tkinter не найден. Переустановите Python с поддержкой Tkinter.")
 
-import threading, time, datetime, math, ctypes
+import threading, time, datetime, math, ctypes, json
 from ctypes import wintypes
 from collections import deque
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 try:
     import pyautogui
@@ -50,7 +54,17 @@ except ImportError:
     auto = None
     HAS_UIA = False
 
-# ── Палитра ─────────────────────────────────────────────────────────────────
+# ── Темы ──────────────────────────────────────────────────────────────────────
+THEMES = {
+    'dark':  dict(BG='#0d1117', C1='#161b22', C2='#21262d', BRD='#30363d',
+                  TXT='#e6edf3', DIM='#8b949e', ACC='#58a6ff',
+                  SUC='#3fb950', ERR='#f85149', WARN='#e3b341'),
+    'light': dict(BG='#f6f8fa', C1='#ffffff', C2='#eaeef2', BRD='#d0d7de',
+                  TXT='#1f2328', DIM='#636c76', ACC='#0969da',
+                  SUC='#1a7f37', ERR='#d1242f', WARN='#9a6700'),
+}
+
+# ── Палитра (по умолчанию dark; перезаписывается _apply_theme_vars) ───────────
 BG, C1, C2 = "#0d1117", "#161b22", "#21262d"
 ACC, TXT, DIM = "#58a6ff", "#e6edf3", "#8b949e"
 SUC, ERR, WARN, BRD = "#3fb950", "#f85149", "#e3b341", "#30363d"
@@ -133,6 +147,19 @@ I18N = {
         'log_plan_done': 'План выполнен — все разовые запуски отработали.',
         'log_plan_already_running': '⚠ Нельзя запустить план — уже идёт одиночный запуск (СТАРТ).',
         'log_single_blocked_by_plan': '⚠ Нельзя нажать СТАРТ — сейчас работает план.',
+        'theme_dark': '☾ Тёмная',
+        'theme_light': '☀ Светлая',
+        'autostart_on':  '⏻ Автозапуск: ВКЛ',
+        'autostart_off': '⏻ Автозапуск: ВЫКЛ',
+        'chat_sel_all': 'Все',
+        'chat_sel_none': 'Снять',
+        'chat_selected': 'Выбрано: {n} из {total}',
+        'switch_first': 'Чаты для обработки:',
+        'stats_session': 'Сессия: {clicks} цикл(ов), {ok} успешно ({pct}%)',
+        'history_title': 'История срабатываний',
+        'history_empty': 'Срабатываний ещё не было',
+        'history_ok': '✓ {n} чат(ов)',
+        'history_fail': '✗ не сделано',
     },
     'en': {
         'missing': '⚠ Missing: {deps}\npip install {installs}',
@@ -207,11 +234,25 @@ I18N = {
         'log_plan_done': 'Plan finished — all one-off triggers ran.',
         'log_plan_already_running': '⚠ Can\'t start the plan — a single run (START) is already active.',
         'log_single_blocked_by_plan': '⚠ Can\'t click START — the plan is currently running.',
+        'theme_dark': '☾ Dark',
+        'theme_light': '☀ Light',
+        'autostart_on':  '⏻ Autostart: ON',
+        'autostart_off': '⏻ Autostart: OFF',
+        'chat_sel_all': 'All',
+        'chat_sel_none': 'None',
+        'chat_selected': 'Selected: {n} of {total}',
+        'switch_first': 'Chats to process:',
+        'stats_session': 'Session: {clicks} cycle(s), {ok} successful ({pct}%)',
+        'history_title': 'Trigger history',
+        'history_empty': 'No triggers yet',
+        'history_ok': '✓ {n} chat(s)',
+        'history_fail': '✗ nothing done',
     },
 }
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 TPL_DIR = os.path.join(APP_DIR, 'templates')
+SETTINGS_FILE = os.path.join(APP_DIR, 'settings.json')
 os.makedirs(TPL_DIR, exist_ok=True)
 
 # "Continue" больше не ищется как кнопка (см. auto_continue в run_cycle) —
@@ -572,7 +613,7 @@ def template_fallback_click(labels: list, confidence: float,
 TRY_AGAIN_LABELS = ['Try again', 'try again', 'Retry', 'Попробовать снова']
 
 
-def run_cycle(n: int, search_try_again: bool, auto_continue: bool, confidence: float,
+def run_cycle(n_or_indices, search_try_again: bool, auto_continue: bool, confidence: float,
              log_fn, badge_fn=None) -> int:
     """search_try_again — искать и кликать реальную кнопку "Try again" (лимит запросов).
     auto_continue — после захода в чат нажать Enter НЕЗАВИСИМО от того, нашлась ли
@@ -633,7 +674,10 @@ def run_cycle(n: int, search_try_again: bool, auto_continue: bool, confidence: f
         return did_something
 
     if chats:
-        targets = chats[:max(1, n)]
+        if isinstance(n_or_indices, list):
+            targets = [chats[i] for i in n_or_indices if i < len(chats)] or chats[:1]
+        else:
+            targets = chats[:max(1, n_or_indices)]
         log_fn(f'  Чатов в сайдбаре: {len(chats)}, целевых: {len(targets)}', 'dim')
         for i, chat in enumerate(targets):
             log_fn(f'  [{i+1}] {chat["name"][:44]}', 'dim')
@@ -1015,27 +1059,37 @@ class App:
     def __init__(self, root: tk.Tk):
         self.root = root
         root.title('Claude Code Auto-Continue')
-        root.configure(bg=BG)
         root.geometry('480x880')
         root.minsize(440, 620)
 
         self.lang = 'ru'
+        self._theme = 'dark'
         self._running  = False
         self._stop_evt = threading.Event()
         self._target   = None
         self._total_s  = 1.0
         self._chats_preview = []
         self._last_windows = []
+        self._selected_chat_idx: set = set()   # индексы выбранных чатов
 
-        self._plan = []                    # список [(h, m), ...], растущий по кнопке "+ Добавить"
+        self._plan = []
         self._plan_running = False
         self._plan_stop_evt = threading.Event()
         self._plan_next_target = None
 
+        self._stat_clicks = 0
+        self._stat_ok = 0
+        self._history: list = []   # [{ts, ok}], max 10
+
+        self._cfg: dict = {}       # загруженные настройки
+
+        self._load_settings()
+        self._apply_theme_vars()
         self._check_deps()
         self._build()
         self._tick()
         self._scan_now()
+        root.protocol('WM_DELETE_WINDOW', self._on_close)
 
     def t(self, key, **kw):
         s = I18N[self.lang][key]
@@ -1048,6 +1102,170 @@ class App:
         if Image is None: missing.append('pillow')
         self._missing = missing
 
+    # ── Тема ────────────────────────────────────────────────────────────────
+
+    def _apply_theme_vars(self):
+        g = globals()
+        for k, v in THEMES[self._theme].items():
+            g[k] = v
+        self.root.configure(bg=BG)
+
+    def _set_theme(self, name: str):
+        if name == self._theme:
+            return
+        self._save_settings()
+        self._theme = name
+        for w in self.root.winfo_children():
+            w.destroy()
+        self._apply_theme_vars()
+        self._build()
+
+    # ── Настройки ───────────────────────────────────────────────────────────
+
+    def _load_settings(self):
+        try:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                d = json.load(f)
+        except Exception:
+            d = {}
+        self._cfg = d
+        self.lang = d.get('lang', 'ru')
+        self._theme = d.get('theme', 'dark')
+        self._plan = [tuple(x) for x in d.get('plan', [])]
+        self._history = d.get('history', [])[-10:]
+
+    def _save_settings(self):
+        d = {
+            'lang': self.lang,
+            'theme': self._theme,
+            'h': self._sg('sp_h', 5),
+            'm': self._sg('sp_m', 0),
+            'watch': self._sgv('v_watch', False),
+            'interval': self._sgv('v_interval', '30'),
+            'btn_try': self._sgv('v_btn_try', True),
+            'btn_cont': self._sgv('v_btn_cont', True),
+            'conf': self._sgv('v_conf', 0.82),
+            'plan_h': self._sg('sp_plan_h', 5),
+            'plan_m': self._sg('sp_plan_m', 0),
+            'plan_repeat': self._sgv('v_plan_repeat', True),
+            'plan': list(self._plan),
+            'history': self._history[-10:],
+        }
+        try:
+            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(d, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _sg(self, attr, default):
+        try: return getattr(self, attr).get()
+        except Exception: return default
+
+    def _sgv(self, attr, default):
+        try: return getattr(self, attr).get()
+        except Exception: return default
+
+    def _on_close(self):
+        self._save_settings()
+        self.root.destroy()
+
+    # ── Автозапуск Windows ─────────────────────────────────────────────────
+
+    def _get_autostart(self) -> bool:
+        if winreg is None:
+            return False
+        try:
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                r'Software\Microsoft\Windows\CurrentVersion\Run', 0, winreg.KEY_READ)
+            winreg.QueryValueEx(k, 'ClaudeAutoContinue')
+            winreg.CloseKey(k)
+            return True
+        except Exception:
+            return False
+
+    def _toggle_autostart(self):
+        if winreg is None:
+            self._log('winreg недоступен', 'error')
+            return
+        try:
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                r'Software\Microsoft\Windows\CurrentVersion\Run', 0,
+                winreg.KEY_SET_VALUE | winreg.KEY_READ)
+            on = False
+            try:
+                winreg.QueryValueEx(k, 'ClaudeAutoContinue')
+                on = True
+            except FileNotFoundError:
+                pass
+            if on:
+                winreg.DeleteValue(k, 'ClaudeAutoContinue')
+            else:
+                cmd = f'"{sys.executable}" "{os.path.abspath(__file__)}"'
+                winreg.SetValueEx(k, 'ClaudeAutoContinue', 0, winreg.REG_SZ, cmd)
+            winreg.CloseKey(k)
+            self._update_autostart_btn()
+        except Exception as e:
+            self._log(f'Autostart error: {e}', 'error')
+
+    def _update_autostart_btn(self):
+        if hasattr(self, 'btn_autostart'):
+            on = self._get_autostart()
+            self.btn_autostart.config(
+                text=self.t('autostart_on') if on else self.t('autostart_off'))
+
+    # ── Статистика и история ──────────────────────────────────────────────
+
+    def _stat_click(self, ok_count: int):
+        self._stat_clicks += 1
+        if ok_count > 0:
+            self._stat_ok += 1
+        self.root.after(0, self._update_stats_label)
+
+    def _update_stats_label(self):
+        if not hasattr(self, 'lbl_stats'):
+            return
+        if self._stat_clicks == 0:
+            self.lbl_stats.config(text='')
+            return
+        pct = int(self._stat_ok / self._stat_clicks * 100)
+        self.lbl_stats.config(
+            text=self.t('stats_session',
+                        clicks=self._stat_clicks, ok=self._stat_ok, pct=pct),
+            fg=SUC if pct >= 50 else WARN)
+
+    def _add_history(self, ok: int):
+        ts = datetime.datetime.now().strftime('%d.%m %H:%M')
+        self._history.append({'ts': ts, 'ok': ok})
+        self._history = self._history[-10:]
+        self._save_settings()
+        self.root.after(0, self._refresh_history)
+
+    def _refresh_history(self):
+        if not hasattr(self, 'history_list_frame'):
+            return
+        for w in self.history_list_frame.winfo_children():
+            w.destroy()
+        if not self._history:
+            tk.Label(self.history_list_frame, text=self.t('history_empty'),
+                     bg=BG, fg=DIM, font=('Segoe UI', 8)).pack(anchor='w')
+            return
+        for e in reversed(self._history):
+            col = SUC if e['ok'] > 0 else ERR
+            result = self.t('history_ok', n=e['ok']) if e['ok'] > 0 else self.t('history_fail')
+            tk.Label(self.history_list_frame,
+                     text=f"  {e['ts']}  →  {result}",
+                     bg=BG, fg=col, font=('Segoe UI', 8)).pack(anchor='w')
+
+    # ── Выбор чатов ───────────────────────────────────────────────────────
+
+    def _chat_select_all(self):
+        self._selected_chat_idx = set(range(len(self._chats_preview)))
+        self._refresh_chat_list()
+
+    def _chat_select_none(self):
+        self._selected_chat_idx = set()
+        self._refresh_chat_list()
+
     # ── UI ──────────────────────────────────────────────────────────────────
 
     def _build(self):
@@ -1056,12 +1274,31 @@ class App:
         langbar.pack(fill='x', side='top')
         langwrap = tk.Frame(langbar, bg=BG)
         langwrap.pack(side='right', padx=18)
+        # Кнопки: тема / автозапуск / RU / EN
+        next_theme = 'light' if self._theme == 'dark' else 'dark'
+        self.btn_theme = FlatBtn(langwrap,
+                                  self.t('theme_light') if self._theme == 'dark' else self.t('theme_dark'),
+                                  lambda: self._set_theme(next_theme),
+                                  bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                                  font=('Segoe UI', 8), padx=8, pady=3)
+        self.btn_theme.pack(side='left', padx=(0, 6))
+        on = self._get_autostart()
+        self.btn_autostart = FlatBtn(langwrap,
+                                      self.t('autostart_on') if on else self.t('autostart_off'),
+                                      self._toggle_autostart,
+                                      bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                                      font=('Segoe UI', 8), padx=8, pady=3)
+        self.btn_autostart.pack(side='left', padx=(0, 6))
         self.btn_lang_ru = FlatBtn(langwrap, 'RU', lambda: self._set_lang('ru'),
-                                   bg=ACC, fg=BG, hbg=ACC, hfg=BG,
+                                   bg=ACC if self.lang == 'ru' else C2,
+                                   fg=BG if self.lang == 'ru' else DIM,
+                                   hbg=ACC, hfg=BG,
                                    font=('Segoe UI', 8, 'bold'), padx=10, pady=3)
         self.btn_lang_ru.pack(side='left', padx=(0, 3))
         self.btn_lang_en = FlatBtn(langwrap, 'EN', lambda: self._set_lang('en'),
-                                   bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                                   bg=ACC if self.lang == 'en' else C2,
+                                   fg=BG if self.lang == 'en' else DIM,
+                                   hbg=ACC, hfg=BG,
                                    font=('Segoe UI', 8, 'bold'), padx=10, pady=3)
         self.btn_lang_en.pack(side='left')
 
@@ -1240,12 +1477,15 @@ class App:
         self.lbl_switch_first = tk.Label(nr, text=self.t('switch_first'), bg=C1, fg=DIM,
                                          font=('Segoe UI', 9))
         self.lbl_switch_first.pack(side='left')
-        self.sp_n = Spinner(nr, lo=1, hi=20, val=3, big=False,
-                            on_change=lambda _: self._refresh_chat_list())
-        self.sp_n.pack(side='left', padx=(8, 8))
-        self.lbl_chats_word = tk.Label(nr, text=self.t('chats_word'), bg=C1, fg=DIM,
-                                       font=('Segoe UI', 9))
-        self.lbl_chats_word.pack(side='left')
+        self.lbl_chat_selected = tk.Label(nr, text='', bg=C1, fg=ACC,
+                                          font=('Segoe UI', 8))
+        self.lbl_chat_selected.pack(side='left', padx=(8, 0))
+        FlatBtn(nr, self.t('chat_sel_all'), self._chat_select_all,
+                bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                font=('Segoe UI', 8), padx=8, pady=2).pack(side='right', padx=(4, 0))
+        FlatBtn(nr, self.t('chat_sel_none'), self._chat_select_none,
+                bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                font=('Segoe UI', 8), padx=8, pady=2).pack(side='right', padx=(4, 0))
 
         # Сворачиваемый список чатов
         self._chat_collapsed = False
@@ -1357,6 +1597,23 @@ class App:
         br.pack(anchor='w')
         self.badges = [Badge(br, self.t(k)) for k in BADGE_KEYS]
         for b in self.badges: b.pack(side='left', padx=(0, 8))
+
+        # ── Статистика сессии ─────────────────────────────────────────────────
+        self.lbl_stats = tk.Label(body, text='', bg=BG, fg=SUC,
+                                  font=('Segoe UI', 8), anchor='w')
+        self.lbl_stats.pack(fill='x', padx=2, pady=(6, 0))
+
+        # ── История срабатываний ──────────────────────────────────────────────
+        tk.Frame(body, bg=BG, height=8).pack()
+        hist_card = tk.Frame(body, bg=C1, padx=14, pady=10,
+                             highlightthickness=1, highlightbackground=BRD)
+        hist_card.pack(fill='x')
+        tk.Label(hist_card, text=self.t('history_title'), bg=C1, fg=DIM,
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(0, 6))
+        self.history_list_frame = tk.Frame(hist_card, bg=C1)
+        self.history_list_frame.pack(fill='x')
+        self._refresh_history()
+
         tk.Frame(body, bg=BG, height=12).pack()
 
     def _missing_text(self) -> str:
@@ -1385,7 +1642,7 @@ class App:
         self.lbl_sec.config(text=self.t('sec'))
         self.btn_find.config(text=self.t('find_btn'))
         self.lbl_switch_first.config(text=self.t('switch_first'))
-        self.lbl_chats_word.config(text=self.t('chats_word'))
+        self._update_selected_label()
         self.lbl_per_chat.config(text=self.t('per_chat'))
         self.lbl_try_desc.config(text=self.t('try_again_desc'))
         self.lbl_cont_desc.config(text=self.t('continue_desc'))
@@ -1451,6 +1708,9 @@ class App:
     def _update_scan(self, windows, chats):
         self._last_windows = windows
         self._chats_preview = chats
+        # Автовыбор первых 3 при первом обнаружении чатов
+        if chats and not self._selected_chat_idx:
+            self._selected_chat_idx = set(range(min(3, len(chats))))
         if not windows:
             self.lbl_app_status.config(text=self.t('app_not_found'), fg=WARN)
         else:
@@ -1467,22 +1727,51 @@ class App:
         for w in self.chat_list.winfo_children():
             w.destroy()
         chats = self._chats_preview
-        n = self.sp_n.get()
         if not chats:
+            if hasattr(self, 'lbl_chat_selected'):
+                self.lbl_chat_selected.config(text='')
             return
         for i, c in enumerate(chats):
-            active = i < n
-            row = tk.Frame(self.chat_list, bg=C1)
+            active = i in self._selected_chat_idx
+            row = tk.Frame(self.chat_list, bg=C1, cursor='hand2')
             row.pack(fill='x', pady=1)
-            tk.Label(row, text='●', bg=C1, fg=ACC if active else DIM,
-                     font=('Segoe UI', 9)).pack(side='left')
-            name = c['name'][:42] + ('…' if len(c['name']) > 42 else '')
-            tk.Label(row, text=f'  {name}', bg=C1, fg=TXT if active else DIM,
-                     font=('Segoe UI', 8)).pack(side='left')
-        row_h = 19
+            chk_var = tk.BooleanVar(value=active)
+
+            def _toggle(idx=i, var=chk_var):
+                if var.get():
+                    self._selected_chat_idx.add(idx)
+                else:
+                    self._selected_chat_idx.discard(idx)
+                self._update_selected_label()
+
+            chk = tk.Checkbutton(row, variable=chk_var, bg=C1,
+                                 activebackground=C2, selectcolor=C2,
+                                 fg=ACC, activeforeground=ACC,
+                                 command=_toggle, cursor='hand2')
+            chk.pack(side='left')
+            name = c['name'][:40] + ('…' if len(c['name']) > 40 else '')
+            lbl = tk.Label(row, text=name, bg=C1,
+                           fg=TXT if active else DIM, font=('Segoe UI', 8),
+                           cursor='hand2')
+            lbl.pack(side='left', padx=(2, 0))
+            # Клик по тексту тоже переключает галочку
+            lbl.bind('<Button-1>', lambda _e, v=chk_var, t=_toggle: (v.set(not v.get()), t()))
+        self._update_selected_label()
+        row_h = 22
         new_h = min(len(chats) * row_h + 4, 5 * row_h + 4)
         self._chat_canvas.configure(height=new_h)
         self._chat_canvas.yview_moveto(0)
+
+    def _update_selected_label(self):
+        if not hasattr(self, 'lbl_chat_selected'):
+            return
+        total = len(self._chats_preview)
+        n = len(self._selected_chat_idx)
+        if total == 0:
+            self.lbl_chat_selected.config(text='')
+        else:
+            self.lbl_chat_selected.config(
+                text=self.t('chat_selected', n=n, total=total))
 
 
     # ── Захват шаблона ──────────────────────────────────────────────────────
@@ -1594,7 +1883,7 @@ class App:
         if self._stop_evt.is_set(): return
 
         self._slog(self.t('log_time_search'), 'warn')
-        n = self.sp_n.get()
+        indices = sorted(self._selected_chat_idx) or [0]
         try_again, auto_cont = self.v_btn_try.get(), self.v_btn_cont.get()
         conf = self.v_conf.get()
 
@@ -1602,10 +1891,12 @@ class App:
         for attempt in range(1, 4):
             if self._stop_evt.is_set(): return
             self._slog(self.t('log_attempt', n=attempt), 'dim')
-            ok = run_cycle(n, try_again, auto_cont, conf, self._slog, self._badge)
+            ok = run_cycle(indices, try_again, auto_cont, conf, self._slog, self._badge)
             if ok: break
             if attempt < 3: self._stop_evt.wait(5)
 
+        self._stat_click(ok)
+        self._add_history(ok)
         if ok:
             self.root.after(0, lambda c=ok: self.ring.draw(100, '✓', self.t('ring_done', n=c), SUC))
             self._slog(self.t('log_success', n=ok), 'success')
@@ -1619,8 +1910,11 @@ class App:
             while not self._stop_evt.is_set():
                 self._stop_evt.wait(iv)
                 if self._stop_evt.is_set(): break
-                run_cycle(self.sp_n.get(), self.v_btn_try.get(), self.v_btn_cont.get(),
-                         self.v_conf.get(), self._slog, self._badge)
+                watch_ok = run_cycle(sorted(self._selected_chat_idx) or [0],
+                                     self.v_btn_try.get(), self.v_btn_cont.get(),
+                                     self.v_conf.get(), self._slog, self._badge)
+                self._stat_click(watch_ok)
+                self._add_history(watch_ok)
 
         if not self._stop_evt.is_set():
             self._running = False
@@ -1633,12 +1927,13 @@ class App:
 
     def _click_now(self):
         self._log(self.t('log_now'), 'accent')
-        n = self.sp_n.get()
+        indices = sorted(self._selected_chat_idx) or [0]
         try_again, auto_cont, conf = self.v_btn_try.get(), self.v_btn_cont.get(), self.v_conf.get()
-        threading.Thread(
-            target=lambda: run_cycle(n, try_again, auto_cont, conf, self._slog, self._badge),
-            daemon=True
-        ).start()
+        def _run():
+            ok = run_cycle(indices, try_again, auto_cont, conf, self._slog, self._badge)
+            self._stat_click(ok)
+            self._add_history(ok)
+        threading.Thread(target=_run, daemon=True).start()
 
     def _test_find(self):
         self._log(self.t('log_test'), 'accent')
@@ -1772,10 +2067,12 @@ class App:
                 return
 
             self._slog(self.t('log_plan_trigger', time=next_t.strftime('%H:%M')), 'warn')
-            n = self.sp_n.get()
+            indices = sorted(self._selected_chat_idx) or [0]
             try_again, auto_cont = self.v_btn_try.get(), self.v_btn_cont.get()
             conf = self.v_conf.get()
-            run_cycle(n, try_again, auto_cont, conf, self._slog, self._badge)
+            ok = run_cycle(indices, try_again, auto_cont, conf, self._slog, self._badge)
+            self._stat_click(ok)
+            self._add_history(ok)
 
             if not self.v_plan_repeat.get():
                 fired = (next_t.hour, next_t.minute)

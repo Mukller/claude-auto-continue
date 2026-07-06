@@ -6,6 +6,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.5.0]
+### Added
+- **Settings persistence** — time, intervals, checkboxes, plan times, and trigger history are
+  saved to `settings.json` in the app directory and restored on next launch.
+- **Per-chat checkboxes** — replaced the "first N chats" spinner with individual checkboxes
+  for each detected chat; clicking a row label also toggles the checkbox. First 3 chats
+  are auto-selected on initial scan.
+- **Windows autostart toggle** — button in the top bar writes/removes the app entry in
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+- **Session statistics** — cycle counter with success percentage shown below the badge row;
+  updates after every run cycle.
+- **Trigger history** — last 10 trigger events (timestamp + OK/fail) displayed in a card
+  at the bottom; persisted across restarts.
+- **Theme toggle** — top-bar button switches between the existing dark (GitHub dark) palette
+  and a new light palette; preference is saved and restored.
+### Changed
+- Language buttons now reflect the active language with the accent color, matching the
+  pre-existing visual convention.
+
 ## [3.4.0]
 ### Changed
 - **Scrollable main body** — all cards now live inside a Canvas+Scrollbar scroll area;

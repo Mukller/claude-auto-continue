@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.7.0]
+### Changed
+- **Rounded cards** — all content cards (trigger, plan, Claude Desktop, templates, history)
+  now use a Canvas-based `RoundedCard` widget with smooth 12 px corner curves and a
+  1 px border accent on hover/active state, replacing square `tk.Frame` borders.
+- **Collapsible log** — the log panel is collapsed by default when empty; clicking the
+  `▸ Log` header expands it. A small blue count badge (`● N`) appears on the header
+  when new messages arrive while collapsed. Clearing the log auto-collapses the panel.
+
 ## [3.6.0]
 ### Added
 - **System tray** (`pystray`, optional) — closing the window minimizes to tray instead of

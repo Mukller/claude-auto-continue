@@ -1025,6 +1025,62 @@ class Badge(tk.Frame):
         self._name_lbl.config(text=name)
 
 
+class RoundedCard(tk.Canvas):
+    """Карточка со скруглёнными углами. Дочерние виджеты добавляются в .inner."""
+
+    def __init__(self, master, radius=12, fill=C1, outline=BRD,
+                 ipadx=18, ipady=12, **kw):
+        super().__init__(master, bg=BG, highlightthickness=0, bd=0, **kw)
+        self._r  = radius
+        self._fill = fill
+        self._ol   = outline
+        self.inner = tk.Frame(self, bg=fill, padx=ipadx, pady=ipady)
+        self._wid  = self.create_window(radius, radius,
+                                        window=self.inner, anchor='nw')
+        self.bind('<Configure>', self._on_cv_cfg)
+        self.inner.bind('<Configure>',
+                        lambda _: self.after_idle(self._sync_height))
+
+    # ── layout ──────────────────────────────────────────────────────────────
+
+    def _on_cv_cfg(self, e=None):
+        w = e.width if e else self.winfo_width()
+        if w > 2 * self._r:
+            self.itemconfigure(self._wid, width=w - 2 * self._r)
+        self._draw()
+
+    def _sync_height(self):
+        ih = self.inner.winfo_reqheight()
+        self.configure(height=ih + 2 * self._r)
+        self._draw()
+
+    # ── drawing ─────────────────────────────────────────────────────────────
+
+    def _draw(self):
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 4 or h < 4:
+            return
+        self.delete('bg')
+        r = self._r
+        self.create_polygon(
+            [r,0, w-r,0, w,0, w,r, w,h-r, w,h, w-r,h, r,h,
+             0,h, 0,h-r, 0,r, 0,0, r,0],
+            smooth=True, fill=self._fill, outline=self._ol,
+            width=1, tags='bg')
+        self.tag_lower('bg')
+
+    # ── public API ───────────────────────────────────────────────────────────
+
+    def set_outline(self, color):
+        self._ol = color
+        self._draw()
+
+    def set_fill(self, color):
+        self._fill = color
+        self.inner.configure(bg=color)
+        self._draw()
+
+
 class TemplateRow(tk.Frame):
     def __init__(self, parent, key: str, app, **kw):
         super().__init__(parent, bg=C1, **kw)
@@ -1109,6 +1165,9 @@ class App:
 
         self._tray_icon = None     # pystray.Icon или None
         self._tray_minimize = tk.BooleanVar(value=True)
+
+        self._log_collapsed = False
+        self._log_new_count = 0
 
         self._cfg: dict = {}       # загруженные настройки
 
@@ -1440,24 +1499,43 @@ class App:
         tk.Frame(self.root, bg=ACC, height=2).pack(fill='x', side='top')
 
         # ── Фиксированный лог внизу ─────────────────────────────────────────
-        log_area = tk.Frame(self.root, bg=BG)
-        log_area.pack(fill='both', side='bottom', expand=False)
-        tk.Frame(log_area, bg=BRD, height=1).pack(fill='x')
-        lh = tk.Frame(log_area, bg=BG, padx=20)
-        lh.pack(fill='x', pady=(5, 3))
+        self._log_area = tk.Frame(self.root, bg=BG)
+        self._log_area.pack(fill='both', side='bottom', expand=False)
+        tk.Frame(self._log_area, bg=BRD, height=1).pack(fill='x')
+
+        # Заголовок (всегда виден, кликабелен)
+        lh = tk.Frame(self._log_area, bg=BG, padx=16, cursor='hand2')
+        lh.pack(fill='x', pady=(4, 2))
+        self._log_arrow = tk.Label(lh, text='▾', bg=BG, fg=DIM,
+                                   font=('Segoe UI', 9), cursor='hand2')
+        self._log_arrow.pack(side='left')
         self.lbl_log_title = tk.Label(lh, text=self.t('log_title'), bg=BG, fg=DIM,
-                                      font=('Segoe UI', 8, 'bold'))
-        self.lbl_log_title.pack(side='left')
+                                      font=('Segoe UI', 8, 'bold'), cursor='hand2')
+        self.lbl_log_title.pack(side='left', padx=(4, 0))
+        self._log_badge = tk.Label(lh, text='', bg=ACC, fg=BG,
+                                   font=('Segoe UI', 7, 'bold'), padx=5, pady=1)
+        # badge упакуется позже когда нужен
         self.btn_clear = FlatBtn(lh, self.t('clear_btn'), self._clear_log,
                                  bg=BG, fg=DIM, hfg=TXT, font=('Segoe UI', 8))
         self.btn_clear.pack(side='right')
-        self.log = tk.Text(log_area, bg=C1, fg=TXT, font=('Consolas', 8),
-                            relief='flat', bd=0, state='disabled', wrap='word',
-                            insertbackground=TXT, height=7, padx=12, pady=6)
+        for w in (lh, self._log_arrow, self.lbl_log_title):
+            w.bind('<Button-1>', lambda _: self._toggle_log())
+
+        # Тело лога (сворачивается)
+        self._log_body = tk.Frame(self._log_area, bg=BG)
+        self._log_body.pack(fill='both', expand=True)
+        self.log = tk.Text(self._log_body, bg=C1, fg=TXT, font=('Consolas', 8),
+                           relief='flat', bd=0, state='disabled', wrap='word',
+                           insertbackground=TXT, height=7, padx=12, pady=6)
         self.log.pack(fill='both', expand=True)
         for tag, fg in [('success', SUC), ('error', ERR), ('warn', WARN),
                         ('dim', DIM), ('accent', ACC)]:
             self.log.tag_config(tag, foreground=fg)
+
+        # Начальное состояние: лог пустой — сворачиваем
+        self._log_collapsed = True
+        self._log_body.pack_forget()
+        self._log_arrow.config(text='▸')
 
         # ── Прокручиваемая средняя часть ────────────────────────────────────
         scroll_outer = tk.Frame(self.root, bg=BG)
@@ -1500,13 +1578,13 @@ class App:
         self.lbl_hint.pack(pady=(3, 10))
 
         # ── Карточка: одиночный запуск ───────────────────────────────────────
-        self._tc = tk.Frame(body, bg=C1, padx=18, pady=12,
-                            highlightthickness=1, highlightbackground=BRD)
+        self._tc = RoundedCard(body, radius=12, fill=C1, outline=BRD,
+                               ipadx=18, ipady=12)
         self._tc.pack(fill='x')
-        self.lbl_trigger_at = tk.Label(self._tc, text=self.t('trigger_at'), bg=C1, fg=DIM,
-                                       font=('Segoe UI', 9, 'bold'))
+        self.lbl_trigger_at = tk.Label(self._tc.inner, text=self.t('trigger_at'),
+                                       bg=C1, fg=DIM, font=('Segoe UI', 9, 'bold'))
         self.lbl_trigger_at.pack(anchor='w', pady=(0, 8))
-        trow = tk.Frame(self._tc, bg=C1)
+        trow = tk.Frame(self._tc.inner, bg=C1)
         trow.pack()
         self.sp_h = Spinner(trow, lo=0, hi=23, val=5)
         self.sp_h.pack(side='left')
@@ -1543,14 +1621,14 @@ class App:
 
         # ── Карточка: план запусков ──────────────────────────────────────────
         tk.Frame(body, bg=BG, height=10).pack()
-        self._pc = tk.Frame(body, bg=C1, padx=18, pady=12,
-                            highlightthickness=1, highlightbackground=BRD)
+        self._pc = RoundedCard(body, radius=12, fill=C1, outline=BRD,
+                               ipadx=18, ipady=12)
         self._pc.pack(fill='x')
-        self.lbl_plan_title = tk.Label(self._pc, text=self.t('plan_title'), bg=C1, fg=DIM,
-                                       font=('Segoe UI', 9, 'bold'))
+        self.lbl_plan_title = tk.Label(self._pc.inner, text=self.t('plan_title'),
+                                       bg=C1, fg=DIM, font=('Segoe UI', 9, 'bold'))
         self.lbl_plan_title.pack(anchor='w', pady=(0, 8))
 
-        prow = tk.Frame(self._pc, bg=C1)
+        prow = tk.Frame(self._pc.inner, bg=C1)
         prow.pack(fill='x')
         self.sp_plan_h = Spinner(prow, lo=0, hi=23, val=5, big=False)
         self.sp_plan_h.pack(side='left')
@@ -1563,31 +1641,32 @@ class App:
                                     font=('Segoe UI', 9), padx=12, pady=6)
         self.btn_plan_add.pack(side='left', padx=(12, 0))
 
-        self.plan_list_frame = tk.Frame(self._pc, bg=C1)
+        self.plan_list_frame = tk.Frame(self._pc.inner, bg=C1)
         self.plan_list_frame.pack(fill='x', pady=(8, 0))
 
         self.v_plan_repeat = tk.BooleanVar(value=True)
         self.chk_plan_repeat = tk.Checkbutton(
-            self._pc, text=self.t('plan_repeat'), variable=self.v_plan_repeat,
+            self._pc.inner, text=self.t('plan_repeat'), variable=self.v_plan_repeat,
             bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
             activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2')
         self.chk_plan_repeat.pack(anchor='w', pady=(8, 0))
 
-        self.lbl_plan_status = tk.Label(self._pc, text=self.t('plan_status_idle'),
+        self.lbl_plan_status = tk.Label(self._pc.inner, text=self.t('plan_status_idle'),
                                         bg=C1, fg=DIM, font=('Segoe UI', 8),
                                         justify='left', anchor='w')
         self.lbl_plan_status.pack(fill='x', pady=(6, 4))
 
-        self.btn_plan_start = FlatBtn(self._pc, self.t('plan_start_btn'), self._toggle_plan,
+        self.btn_plan_start = FlatBtn(self._pc.inner, self.t('plan_start_btn'), self._toggle_plan,
                                       bg=C2, fg=TXT, hbg=BRD, hfg=TXT,
                                       font=('Segoe UI', 10, 'bold'), padx=16, pady=10)
         self.btn_plan_start.pack(fill='x')
 
         # ── Карточка: Claude Desktop + чаты ─────────────────────────────────
         tk.Frame(body, bg=BG, height=10).pack()
-        wc = tk.Frame(body, bg=C1, padx=18, pady=12,
-                      highlightthickness=1, highlightbackground=BRD)
-        wc.pack(fill='x')
+        _wc_card = RoundedCard(body, radius=12, fill=C1, outline=BRD,
+                               ipadx=18, ipady=12)
+        _wc_card.pack(fill='x')
+        wc = _wc_card.inner
 
         wh = tk.Frame(wc, bg=C1)
         wh.pack(fill='x')
@@ -1700,9 +1779,10 @@ class App:
 
         # ── Резервный вариант: шаблоны ───────────────────────────────────────
         tk.Frame(body, bg=BG, height=10).pack()
-        tc2 = tk.Frame(body, bg=C1, padx=18, pady=12,
-                       highlightthickness=1, highlightbackground=BRD)
-        tc2.pack(fill='x')
+        _tc2_card = RoundedCard(body, radius=12, fill=C1, outline=BRD,
+                                ipadx=18, ipady=12)
+        _tc2_card.pack(fill='x')
+        tc2 = _tc2_card.inner
         self.lbl_fallback_title = tk.Label(tc2, text=self.t('fallback_title'), bg=C1, fg=DIM,
                                            font=('Segoe UI', 8, 'bold'))
         self.lbl_fallback_title.pack(anchor='w', pady=(0, 8))
@@ -1735,12 +1815,12 @@ class App:
 
         # ── История срабатываний ──────────────────────────────────────────────
         tk.Frame(body, bg=BG, height=8).pack()
-        hist_card = tk.Frame(body, bg=C1, padx=14, pady=10,
-                             highlightthickness=1, highlightbackground=BRD)
-        hist_card.pack(fill='x')
-        tk.Label(hist_card, text=self.t('history_title'), bg=C1, fg=DIM,
+        _hist_card = RoundedCard(body, radius=12, fill=C1, outline=BRD,
+                                 ipadx=14, ipady=10)
+        _hist_card.pack(fill='x')
+        tk.Label(_hist_card.inner, text=self.t('history_title'), bg=C1, fg=DIM,
                  font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(0, 6))
-        self.history_list_frame = tk.Frame(hist_card, bg=C1)
+        self.history_list_frame = tk.Frame(_hist_card.inner, bg=C1)
         self.history_list_frame.pack(fill='x')
         self._refresh_history()
 
@@ -1931,12 +2011,38 @@ class App:
 
     # ── Лог ─────────────────────────────────────────────────────────────────
 
+    def _toggle_log(self):
+        if self._log_collapsed:
+            self._log_expand()
+        else:
+            self._log_collapse()
+
+    def _log_expand(self):
+        if not self._log_collapsed:
+            return
+        self._log_collapsed = False
+        self._log_new_count = 0
+        self._log_badge.pack_forget()
+        self._log_body.pack(fill='both', expand=True)
+        self._log_arrow.config(text='▾')
+
+    def _log_collapse(self):
+        if self._log_collapsed:
+            return
+        self._log_collapsed = True
+        self._log_body.pack_forget()
+        self._log_arrow.config(text='▸')
+
     def _log(self, msg, tag=''):
         ts = datetime.datetime.now().strftime('%H:%M:%S')
         self.log.config(state='normal')
         self.log.insert('end', f'[{ts}]  {msg}\n', tag)
         self.log.see('end')
         self.log.config(state='disabled')
+        if self._log_collapsed:
+            self._log_new_count += 1
+            self._log_badge.config(text=str(self._log_new_count))
+            self._log_badge.pack(side='left', padx=(6, 0))
 
     def _slog(self, msg, tag=''):
         self.root.after(0, lambda m=msg, t=tag: self._log(m, t))
@@ -1945,6 +2051,10 @@ class App:
         self.log.config(state='normal')
         self.log.delete('1.0', 'end')
         self.log.config(state='disabled')
+        self._log_new_count = 0
+        self._log_badge.pack_forget()
+        # После очистки сворачиваем лог
+        self.root.after(100, self._log_collapse)
 
     def _badge(self, i, state):
         self.root.after(0, lambda: self.badges[i].set(state))
@@ -1983,7 +2093,7 @@ class App:
             self.lbl_hint.config(text='')
             self._log(self.t('log_stopped'), 'dim')
             for b in self.badges: b.set('idle')
-            self._tc.configure(highlightbackground=BRD)
+            self._tc.set_outline(BRD)
         else:
             self._start()
 
@@ -2002,7 +2112,7 @@ class App:
         self.main_btn.config(text=self.t('stop_btn'))
         self.lbl_hint.config(text=f'→ {self._target.strftime("%d.%m.%Y  %H:%M")}')
         self._log(self.t('log_started', time=self._target.strftime("%d.%m %H:%M")), 'accent')
-        self._tc.configure(highlightbackground=ACC)
+        self._tc.set_outline(ACC)
         threading.Thread(target=self._worker, daemon=True).start()
 
     def _worker(self):
@@ -2053,7 +2163,7 @@ class App:
                 self.main_btn.recolor(ACC, BG, '#79b8ff'),
                 self.main_btn.config(text=self.t('start_btn')),
                 self.lbl_hint.config(text=''),
-                self._tc.configure(highlightbackground=BRD),
+                self._tc.set_outline(BRD),
             ])
 
     def _click_now(self):
@@ -2159,7 +2269,7 @@ class App:
             self.btn_plan_start.config(text=self.t('plan_start_btn'))
             self._log(self.t('log_plan_stopped'), 'dim')
             self._update_plan_status()
-            self._pc.configure(highlightbackground=BRD)
+            self._pc.set_outline(BRD)
         else:
             self._plan_start()
 
@@ -2179,7 +2289,7 @@ class App:
         self.btn_plan_start.recolor(ERR, '#fff', '#ff6b6b')
         self.btn_plan_start.config(text=self.t('plan_stop_btn'))
         self._log(self.t('log_plan_started', n=len(self._plan)), 'accent')
-        self._pc.configure(highlightbackground=ACC)
+        self._pc.set_outline(ACC)
         threading.Thread(target=self._plan_worker, daemon=True).start()
 
     def _plan_worker(self):
@@ -2223,7 +2333,7 @@ class App:
                 self.btn_plan_start.recolor(C2, TXT, hbg=BRD),
                 self.btn_plan_start.config(text=self.t('plan_start_btn')),
                 self._update_plan_status(),
-                self._pc.configure(highlightbackground=BRD),
+                self._pc.set_outline(BRD),
             ])
 
 

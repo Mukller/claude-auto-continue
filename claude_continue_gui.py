@@ -1100,11 +1100,24 @@ class RoundedCard(tk.Canvas):
             return
         self.delete('bg')
         r = self._r
-        self.create_polygon(
-            [r,0, w-r,0, w,0, w,r, w,h-r, w,h, w-r,h, r,h,
-             0,h, 0,h-r, 0,r, 0,0],
-            smooth=True, fill=self._fill, outline=self._ol,
-            width=1, tags='bg')
+        # Дублирование точек на прямых рёбрах «прижимает» B-сплайн к ним,
+        # а одиночные угловые точки создают дугу скругления.
+        pts = [
+            r,0,   r,0,       # ┐ верхнее ребро (левый якорь)
+            w-r,0, w-r,0,     # ┘ верхнее ребро (правый якорь)
+            w,0,              # ○ угол top-right
+            w,r,   w,r,       # ┐ правое ребро (верхний якорь)
+            w,h-r, w,h-r,     # ┘ правое ребро (нижний якорь)
+            w,h,              # ○ угол bottom-right
+            w-r,h, w-r,h,     # ┐ нижнее ребро (правый якорь)
+            r,h,   r,h,       # ┘ нижнее ребро (левый якорь)
+            0,h,              # ○ угол bottom-left
+            0,h-r, 0,h-r,     # ┐ левое ребро (нижний якорь)
+            0,r,   0,r,       # ┘ левое ребро (верхний якорь)
+            0,0,              # ○ угол top-left
+        ]
+        self.create_polygon(pts, smooth=True, fill=self._fill, outline=self._ol,
+                            width=1, tags='bg')
         self.tag_lower('bg')
 
     # ── public API ───────────────────────────────────────────────────────────

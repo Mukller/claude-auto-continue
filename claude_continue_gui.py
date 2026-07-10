@@ -1601,6 +1601,15 @@ class App:
                  font=('Segoe UI', 12, 'bold')).pack(side='left', padx=10)
         tk.Frame(self.root, bg=ACC, height=2).pack(fill='x', side='top')
 
+        # ── Кольцевой таймер (фиксированный, всегда виден) ──────────────────
+        ring_frame = tk.Frame(self.root, bg=BG, pady=10)
+        ring_frame.pack(side='top', fill='x')
+        self.ring = RingTimer(ring_frame)
+        self.ring.pack()
+        self.lbl_hint = tk.Label(ring_frame, text='', bg=BG, fg=DIM,
+                                 font=('Segoe UI', 8))
+        self.lbl_hint.pack(pady=(2, 0))
+
         # ── Фиксированный лог внизу ─────────────────────────────────────────
         self._log_area = tk.Frame(self.root, bg=BG)
         self._log_area.pack(fill='both', side='bottom', expand=False)
@@ -1716,16 +1725,6 @@ class App:
                    buttonbackground=C2, insertbackground=TXT).pack(side='left', padx=6)
         self.lbl_sec = tk.Label(opts, text=self.t('sec'), bg=BG, fg=DIM, font=('Segoe UI', 9))
         self.lbl_sec.pack(side='left')
-
-        # ── Кольцевой таймер ────────────────────────────────────────────────
-        tk.Frame(body, bg=BG, height=6).pack()
-        ring_wrap = tk.Frame(body, bg=BG)
-        ring_wrap.pack()
-        self.ring = RingTimer(ring_wrap)
-        self.ring.pack()
-        self.lbl_hint = tk.Label(ring_wrap, text='', bg=BG, fg=DIM,
-                                 font=('Segoe UI', 8))
-        self.lbl_hint.pack(pady=(2, 0))
 
         # ── Карточка: план запусков ──────────────────────────────────────────
         tk.Frame(body, bg=BG, height=10).pack()

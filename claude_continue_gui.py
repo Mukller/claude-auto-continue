@@ -1212,6 +1212,7 @@ class App:
         self._plan_running = False
         self._plan_stop_evt = threading.Event()
         self._plan_next_target = None
+        self._tick_active = True
 
         self._stat_clicks = 0
         self._stat_ok = 0
@@ -1270,10 +1271,13 @@ class App:
         })
         self._save_settings()
         self._theme = name
+        self._tick_active = False          # остановить текущий цикл
         for w in self.root.winfo_children():
             w.destroy()
         self._apply_theme_vars()
         self._build()
+        self._tick_active = True           # запустить новый цикл
+        self._tick()
 
     # ── Настройки ───────────────────────────────────────────────────────────
 
@@ -1665,6 +1669,15 @@ class App:
 
         self.root.bind_all('<MouseWheel>', self._dispatch_scroll)
 
+        # ── Кольцевой таймер (первый элемент тела — всегда виден без скролла)
+        ring_wrap = tk.Frame(body, bg=BG, pady=8)
+        ring_wrap.pack()
+        self.ring = RingTimer(ring_wrap)
+        self.ring.pack()
+        self.lbl_hint = tk.Label(ring_wrap, text='', bg=BG, fg=DIM,
+                                 font=('Segoe UI', 8))
+        self.lbl_hint.pack(pady=(2, 0))
+
         # ── Предупреждение о зависимостях ───────────────────────────────────
         self.warn_frame = None
         self.lbl_missing = None
@@ -1704,16 +1717,7 @@ class App:
                                 font=('Segoe UI', 11, 'bold'), padx=20, pady=12)
         self.main_btn.pack(fill='x')
 
-        # ── Кольцевой таймер ────────────────────────────────────────────────
-        ring_wrap = tk.Frame(body, bg=BG, pady=6)
-        ring_wrap.pack()
-        self.ring = RingTimer(ring_wrap)
-        self.ring.pack()
-        self.lbl_hint = tk.Label(ring_wrap, text='', bg=BG, fg=DIM,
-                                 font=('Segoe UI', 8))
-        self.lbl_hint.pack(pady=(2, 0))
-
-        tk.Frame(body, bg=BG, height=4).pack()
+        tk.Frame(body, bg=BG, height=8).pack()
         opts = tk.Frame(body, bg=BG)
         opts.pack(fill='x')
         self.v_watch = tk.BooleanVar(value=self._cfg.get('watch', False))
@@ -2172,17 +2176,22 @@ class App:
     # ── Таймер ──────────────────────────────────────────────────────────────
 
     def _tick(self):
-        if self._running and self._target:
-            rem = (self._target - datetime.datetime.now()).total_seconds()
-            if rem > 0:
-                pct = max(0, min(100, (1 - rem / self._total_s) * 100))
-                h, m, s = int(rem//3600), int((rem%3600)//60), int(rem%60)
-                self.ring.draw(pct, f'{h:02d}:{m:02d}:{s:02d}',
-                               self.t('ring_waiting', time=self._target.strftime("%H:%M")), ACC)
-            else:
-                self.ring.draw(100, '⏰', self.t('ring_firing'), WARN)
-        elif not self._running:
-            self.ring.draw(0, '--:--:--', self.t('ring_idle'), DIM)
+        if not self._tick_active:
+            return
+        try:
+            if self._running and self._target:
+                rem = (self._target - datetime.datetime.now()).total_seconds()
+                if rem > 0:
+                    pct = max(0, min(100, (1 - rem / self._total_s) * 100))
+                    h, m, s = int(rem//3600), int((rem%3600)//60), int(rem%60)
+                    self.ring.draw(pct, f'{h:02d}:{m:02d}:{s:02d}',
+                                   self.t('ring_waiting', time=self._target.strftime("%H:%M")), ACC)
+                else:
+                    self.ring.draw(100, '⏰', self.t('ring_firing'), WARN)
+            elif not self._running:
+                self.ring.draw(0, '--:--:--', self.t('ring_idle'), DIM)
+        except Exception:
+            pass
         self.root.after(100, self._tick)
 
     # ── Управление ──────────────────────────────────────────────────────────

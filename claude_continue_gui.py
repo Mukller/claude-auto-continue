@@ -1100,24 +1100,27 @@ class RoundedCard(tk.Canvas):
             return
         self.delete('bg')
         r = self._r
-        # Дублирование точек на прямых рёбрах «прижимает» B-сплайн к ним,
-        # а одиночные угловые точки создают дугу скругления.
-        pts = [
-            r,0,   r,0,       # ┐ верхнее ребро (левый якорь)
-            w-r,0, w-r,0,     # ┘ верхнее ребро (правый якорь)
-            w,0,              # ○ угол top-right
-            w,r,   w,r,       # ┐ правое ребро (верхний якорь)
-            w,h-r, w,h-r,     # ┘ правое ребро (нижний якорь)
-            w,h,              # ○ угол bottom-right
-            w-r,h, w-r,h,     # ┐ нижнее ребро (правый якорь)
-            r,h,   r,h,       # ┘ нижнее ребро (левый якорь)
-            0,h,              # ○ угол bottom-left
-            0,h-r, 0,h-r,     # ┐ левое ребро (нижний якорь)
-            0,r,   0,r,       # ┘ левое ребро (верхний якорь)
-            0,0,              # ○ угол top-left
+        f, o = self._fill, self._ol
+        # Заливка: два пересекающихся прямоугольника + 4 угловых сектора
+        self.create_rectangle(r, 0, w - r, h, fill=f, outline='', tags='bg')
+        self.create_rectangle(0, r, w, h - r, fill=f, outline='', tags='bg')
+        corners = [
+            (0,     0,     2*r, 2*r, 90),
+            (w-2*r, 0,     w,   2*r, 0),
+            (0,     h-2*r, 2*r, h,   180),
+            (w-2*r, h-2*r, w,   h,   270),
         ]
-        self.create_polygon(pts, smooth=True, fill=self._fill, outline=self._ol,
-                            width=1, tags='bg')
+        for x0, y0, x1, y1, s in corners:
+            self.create_arc(x0, y0, x1, y1, start=s, extent=90,
+                            fill=f, outline='', style='pieslice', tags='bg')
+        # Обводка: 4 прямых отрезка + 4 настоящих дуги
+        self.create_line(r, 0,   w-r, 0,   fill=o, tags='bg')
+        self.create_line(r, h-1, w-r, h-1, fill=o, tags='bg')
+        self.create_line(0,   r, 0,   h-r, fill=o, tags='bg')
+        self.create_line(w-1, r, w-1, h-r, fill=o, tags='bg')
+        for x0, y0, x1, y1, s in corners:
+            self.create_arc(x0, y0, x1, y1, start=s, extent=90,
+                            style='arc', outline=o, width=1, tags='bg')
         self.tag_lower('bg')
 
     # ── public API ───────────────────────────────────────────────────────────
@@ -1601,15 +1604,6 @@ class App:
                  font=('Segoe UI', 12, 'bold')).pack(side='left', padx=10)
         tk.Frame(self.root, bg=ACC, height=2).pack(fill='x', side='top')
 
-        # ── Кольцевой таймер (фиксированный, всегда виден) ──────────────────
-        ring_frame = tk.Frame(self.root, bg=BG, pady=10)
-        ring_frame.pack(side='top', fill='x')
-        self.ring = RingTimer(ring_frame)
-        self.ring.pack()
-        self.lbl_hint = tk.Label(ring_frame, text='', bg=BG, fg=DIM,
-                                 font=('Segoe UI', 8))
-        self.lbl_hint.pack(pady=(2, 0))
-
         # ── Фиксированный лог внизу ─────────────────────────────────────────
         self._log_area = tk.Frame(self.root, bg=BG)
         self._log_area.pack(fill='both', side='bottom', expand=False)
@@ -1710,7 +1704,16 @@ class App:
                                 font=('Segoe UI', 11, 'bold'), padx=20, pady=12)
         self.main_btn.pack(fill='x')
 
-        tk.Frame(body, bg=BG, height=8).pack()
+        # ── Кольцевой таймер ────────────────────────────────────────────────
+        ring_wrap = tk.Frame(body, bg=BG, pady=6)
+        ring_wrap.pack()
+        self.ring = RingTimer(ring_wrap)
+        self.ring.pack()
+        self.lbl_hint = tk.Label(ring_wrap, text='', bg=BG, fg=DIM,
+                                 font=('Segoe UI', 8))
+        self.lbl_hint.pack(pady=(2, 0))
+
+        tk.Frame(body, bg=BG, height=4).pack()
         opts = tk.Frame(body, bg=BG)
         opts.pack(fill='x')
         self.v_watch = tk.BooleanVar(value=self._cfg.get('watch', False))
@@ -2205,7 +2208,7 @@ class App:
             self._start()
 
     def _start(self):
-        if not HAS_UIA:
+        if IS_WIN and not HAS_UIA:
             self._log(self.t('log_no_uia'), 'error')
             return
         if self._plan_running:
@@ -2381,7 +2384,7 @@ class App:
             self._plan_start()
 
     def _plan_start(self):
-        if not HAS_UIA:
+        if IS_WIN and not HAS_UIA:
             self._log(self.t('log_no_uia'), 'error')
             return
         if not self._plan:

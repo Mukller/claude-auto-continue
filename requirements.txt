@@ -1,6 +1,6 @@
 pyautogui
 pillow
-uiautomation
 opencv-python-headless
-pystray       # optional: system tray support
-plyer         # optional: Windows toast notifications
+uiautomation         # Windows only — required for UIA button/chat search
+pystray              # optional: system tray support
+plyer                # optional: desktop notifications

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Claude Code Auto-Continue — v3
-Автопоиск кнопки (Try again / Continue) через UI Automation + переключение
-между чатами в сайдбаре Claude Desktop. Резервный вариант — поиск по скриншоту.
+"""Claude Code Auto-Continue — v3.8
+Windows: автопоиск кнопки через UI Automation + переключение чатов в сайдбаре.
+macOS:   поиск окна через pgrep/osascript, поиск кнопки по скриншоту-шаблону.
 """
 
 import sys, os
+
+IS_WIN = sys.platform == 'win32'
+IS_MAC = sys.platform == 'darwin'
 
 def _fatal(msg):
     try:
@@ -22,11 +25,14 @@ except ImportError:
     _fatal("tkinter не найден. Переустановите Python с поддержкой Tkinter.")
 
 import threading, time, datetime, math, ctypes, json
-from ctypes import wintypes
 from collections import deque
-try:
-    import winreg
-except ImportError:
+if IS_WIN:
+    from ctypes import wintypes
+    try:
+        import winreg
+    except ImportError:
+        winreg = None
+else:
     winreg = None
 
 try:
@@ -73,9 +79,9 @@ THEMES = {
     'dark':  dict(BG='#0d1117', C1='#161b22', C2='#21262d', BRD='#30363d',
                   TXT='#e6edf3', DIM='#8b949e', ACC='#58a6ff',
                   SUC='#3fb950', ERR='#f85149', WARN='#e3b341'),
-    'light': dict(BG='#f6f8fa', C1='#ffffff', C2='#eaeef2', BRD='#d0d7de',
-                  TXT='#1f2328', DIM='#636c76', ACC='#0969da',
-                  SUC='#1a7f37', ERR='#d1242f', WARN='#9a6700'),
+    'light': dict(BG='#dce1e8', C1='#f0f4f8', C2='#c4cdd8', BRD='#8fa0b0',
+                  TXT='#0f1923', DIM='#384553', ACC='#1a5fb4',
+                  SUC='#1a6e35', ERR='#b81c2e', WARN='#7a4200'),
 }
 
 # ── Палитра (по умолчанию dark; перезаписывается _apply_theme_vars) ───────────
@@ -295,6 +301,8 @@ TEMPLATES = {
 
 def get_process_exe(hwnd: int) -> str:
     """Полный путь к exe владельца окна (по hwnd), без внешних зависимостей."""
+    if not IS_WIN:
+        return ''
     try:
         pid = wintypes.DWORD()
         ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
@@ -313,12 +321,40 @@ def get_process_exe(hwnd: int) -> str:
         return ''
 
 
-def bring_to_foreground(hwnd: int, log_fn=lambda *a, **k: None) -> bool:
+def _find_claude_windows_mac(log_fn):
+    import subprocess as _sp
+    try:
+        r = _sp.run(['pgrep', '-i', '-x', 'Claude'],
+                    capture_output=True, text=True, timeout=3)
+        if r.returncode == 0:
+            return [{'title': 'Claude Desktop', 'ctrl': None, 'hwnd': None}]
+    except Exception as e:
+        log_fn(f'  Mac: поиск Claude: {e}', 'dim')
+    return []
+
+
+def _bring_to_foreground_mac(log_fn):
+    import subprocess as _sp
+    try:
+        _sp.run(['osascript', '-e', 'tell application "Claude" to activate'],
+                capture_output=True, timeout=3)
+        time.sleep(0.3)
+        return True
+    except Exception as e:
+        log_fn(f'  Mac: активация окна: {e}', 'dim')
+        return False
+
+
+def bring_to_foreground(hwnd, log_fn=lambda *a, **k: None) -> bool:
     """SetForegroundWindow из фонового процесса часто молча игнорируется
     Windows (защита от кражи фокуса) — окно может остаться перекрытым
     другим окном (напр. видеозвонком), и клики попадут не туда.
     Стандартный обход: временно прицепиться к очереди ввода активного
     потока через AttachThreadInput."""
+    if IS_MAC:
+        return _bring_to_foreground_mac(log_fn)
+    if not IS_WIN:
+        return True
     try:
         user32 = ctypes.windll.user32
         SW_RESTORE = 9
@@ -349,6 +385,8 @@ def bring_to_foreground(hwnd: int, log_fn=lambda *a, **k: None) -> bool:
 
 def find_claude_windows(log_fn=lambda *a, **k: None) -> list:
     """Найти окна процесса Claude.exe (официальное десктоп-приложение)."""
+    if IS_MAC:
+        return _find_claude_windows_mac(log_fn)
     wins = []
     if not HAS_UIA:
         return wins
@@ -645,13 +683,13 @@ def run_cycle(n_or_indices, search_try_again: bool, auto_continue: bool, confide
     auto_continue — после захода в чат нажать Enter НЕЗАВИСИМО от того, нашлась ли
     кнопка: обычно после исчерпания лимита Claude Code просто ждёт ввода без всякой
     кнопки, и "продолжить" — это буквально нажать Enter в пустом поле ввода."""
-    if not HAS_UIA:
+    if IS_WIN and not HAS_UIA:
         log_fn('  uiautomation не установлен — авто-поиск недоступен', 'error')
         return 0
 
     windows = find_claude_windows(log_fn)
     if not windows:
-        log_fn('  ⚠ Приложение Claude Desktop не найдено (процесс Claude.exe)', 'error')
+        log_fn('  ⚠ Приложение Claude Desktop не найдено', 'error')
         return 0
 
     window = windows[0]
@@ -1064,7 +1102,7 @@ class RoundedCard(tk.Canvas):
         r = self._r
         self.create_polygon(
             [r,0, w-r,0, w,0, w,r, w,h-r, w,h, w-r,h, r,h,
-             0,h, 0,h-r, 0,r, 0,0, r,0],
+             0,h, 0,h-r, 0,r, 0,0],
             smooth=True, fill=self._fill, outline=self._ol,
             width=1, tags='bg')
         self.tag_lower('bg')
@@ -1186,7 +1224,7 @@ class App:
     def _check_deps(self):
         missing = []
         if pyautogui is None: missing.append('pyautogui')
-        if not HAS_UIA: missing.append('uiautomation')
+        if IS_WIN and not HAS_UIA: missing.append('uiautomation')
         if Image is None: missing.append('pillow')
         self._missing = missing
 
@@ -1201,6 +1239,19 @@ class App:
     def _set_theme(self, name: str):
         if name == self._theme:
             return
+        self._cfg.update({
+            'h':           self._sg('sp_h', self._cfg.get('h', 5)),
+            'm':           self._sg('sp_m', self._cfg.get('m', 0)),
+            'plan_h':      self._sg('sp_plan_h', self._cfg.get('plan_h', 5)),
+            'plan_m':      self._sg('sp_plan_m', self._cfg.get('plan_m', 0)),
+            'watch':       self._sgv('v_watch', self._cfg.get('watch', False)),
+            'interval':    self._sgv('v_interval', self._cfg.get('interval', '30')),
+            'btn_try':     self._sgv('v_btn_try', self._cfg.get('btn_try', True)),
+            'btn_cont':    self._sgv('v_btn_cont', self._cfg.get('btn_cont', True)),
+            'conf':        self._sgv('v_conf', self._cfg.get('conf', 0.82)),
+            'plan_repeat': self._sgv('v_plan_repeat', self._cfg.get('plan_repeat', True)),
+            'notif':       self._sgv('v_notif', self._cfg.get('notif', True)),
+        })
         self._save_settings()
         self._theme = name
         for w in self.root.winfo_children():
@@ -1338,9 +1389,12 @@ class App:
         except Exception:
             pass
 
-    # ── Автозапуск Windows ─────────────────────────────────────────────────
+    # ── Автозапуск (Windows + macOS) ──────────────────────────────────────
 
     def _get_autostart(self) -> bool:
+        if IS_MAC:
+            plist = os.path.expanduser('~/Library/LaunchAgents/com.claude.autocontinue.plist')
+            return os.path.exists(plist)
         if winreg is None:
             return False
         try:
@@ -1353,6 +1407,9 @@ class App:
             return False
 
     def _toggle_autostart(self):
+        if IS_MAC:
+            self._toggle_autostart_mac()
+            return
         if winreg is None:
             self._log('winreg недоступен', 'error')
             return
@@ -1375,6 +1432,39 @@ class App:
             self._update_autostart_btn()
         except Exception as e:
             self._log(f'Autostart error: {e}', 'error')
+
+    def _toggle_autostart_mac(self):
+        import subprocess as _sp
+        plist_dir = os.path.expanduser('~/Library/LaunchAgents')
+        plist_path = os.path.join(plist_dir, 'com.claude.autocontinue.plist')
+        if os.path.exists(plist_path):
+            try:
+                _sp.run(['launchctl', 'unload', plist_path], capture_output=True, timeout=5)
+                os.remove(plist_path)
+            except Exception as e:
+                self._log(f'Autostart off error: {e}', 'error')
+        else:
+            try:
+                os.makedirs(plist_dir, exist_ok=True)
+                py = sys.executable
+                script = os.path.abspath(__file__)
+                plist = (
+                    '<?xml version="1.0" encoding="UTF-8"?>\n'
+                    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+                    '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+                    '<plist version="1.0"><dict>\n'
+                    '  <key>Label</key><string>com.claude.autocontinue</string>\n'
+                    f'  <key>ProgramArguments</key><array>'
+                    f'<string>{py}</string><string>{script}</string></array>\n'
+                    '  <key>RunAtLoad</key><true/>\n'
+                    '</dict></plist>\n'
+                )
+                with open(plist_path, 'w') as f:
+                    f.write(plist)
+                _sp.run(['launchctl', 'load', plist_path], capture_output=True, timeout=5)
+            except Exception as e:
+                self._log(f'Autostart on error: {e}', 'error')
+        self._update_autostart_btn()
 
     def _update_autostart_btn(self):
         if hasattr(self, 'btn_autostart'):
@@ -1498,6 +1588,15 @@ class App:
                  font=('Segoe UI', 12, 'bold')).pack(side='left', padx=10)
         tk.Frame(self.root, bg=ACC, height=2).pack(fill='x', side='top')
 
+        # ── Кольцевой таймер (фиксированный, всегда виден) ──────────────────
+        ring_frame = tk.Frame(self.root, bg=BG, pady=10)
+        ring_frame.pack(side='top', fill='x')
+        self.ring = RingTimer(ring_frame)
+        self.ring.pack()
+        self.lbl_hint = tk.Label(ring_frame, text='', bg=BG, fg=DIM,
+                                 font=('Segoe UI', 8))
+        self.lbl_hint.pack(pady=(2, 0))
+
         # ── Фиксированный лог внизу ─────────────────────────────────────────
         self._log_area = tk.Frame(self.root, bg=BG)
         self._log_area.pack(fill='both', side='bottom', expand=False)
@@ -1570,12 +1669,7 @@ class App:
                 font=('Segoe UI', 8), justify='left')
             self.lbl_missing.pack(anchor='w')
 
-        # ── Кольцевой таймер ────────────────────────────────────────────────
-        tk.Frame(body, bg=BG, height=14).pack()
-        self.ring = RingTimer(body)
-        self.ring.pack()
-        self.lbl_hint = tk.Label(body, text='', bg=BG, fg=DIM, font=('Segoe UI', 8))
-        self.lbl_hint.pack(pady=(3, 10))
+        tk.Frame(body, bg=BG, height=10).pack()
 
         # ── Карточка: одиночный запуск ───────────────────────────────────────
         self._tc = RoundedCard(body, radius=12, fill=C1, outline=BRD,
@@ -1586,11 +1680,11 @@ class App:
         self.lbl_trigger_at.pack(anchor='w', pady=(0, 8))
         trow = tk.Frame(self._tc.inner, bg=C1)
         trow.pack()
-        self.sp_h = Spinner(trow, lo=0, hi=23, val=5)
+        self.sp_h = Spinner(trow, lo=0, hi=23, val=self._cfg.get('h', 5))
         self.sp_h.pack(side='left')
         tk.Label(trow, text=':', bg=C1, fg=TXT, font=('Segoe UI Mono', 22, 'bold')
                  ).pack(side='left', padx=10)
-        self.sp_m = Spinner(trow, lo=0, hi=59, val=0)
+        self.sp_m = Spinner(trow, lo=0, hi=59, val=self._cfg.get('m', 0))
         self.sp_m.pack(side='left')
         self.btn_now = FlatBtn(trow, self.t('now_btn'), self._click_now,
                                bg=BG, fg=DIM, hbg=C2, hfg=TXT,
@@ -1606,13 +1700,13 @@ class App:
         tk.Frame(body, bg=BG, height=8).pack()
         opts = tk.Frame(body, bg=BG)
         opts.pack(fill='x')
-        self.v_watch = tk.BooleanVar(value=False)
+        self.v_watch = tk.BooleanVar(value=self._cfg.get('watch', False))
         self.chk_watch = tk.Checkbutton(
             opts, text=self.t('watch_label'), variable=self.v_watch,
             bg=BG, fg=DIM, selectcolor=C2, activebackground=BG,
             activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2')
         self.chk_watch.pack(side='left')
-        self.v_interval = tk.StringVar(value='30')
+        self.v_interval = tk.StringVar(value=str(self._cfg.get('interval', '30')))
         tk.Spinbox(opts, from_=5, to=600, textvariable=self.v_interval, width=3,
                    bg=C2, fg=TXT, relief='flat', bd=0, font=('Segoe UI', 9),
                    buttonbackground=C2, insertbackground=TXT).pack(side='left', padx=6)
@@ -1630,11 +1724,11 @@ class App:
 
         prow = tk.Frame(self._pc.inner, bg=C1)
         prow.pack(fill='x')
-        self.sp_plan_h = Spinner(prow, lo=0, hi=23, val=5, big=False)
+        self.sp_plan_h = Spinner(prow, lo=0, hi=23, val=self._cfg.get('plan_h', 5), big=False)
         self.sp_plan_h.pack(side='left')
         tk.Label(prow, text=':', bg=C1, fg=TXT, font=('Segoe UI Mono', 14, 'bold')
                  ).pack(side='left', padx=6)
-        self.sp_plan_m = Spinner(prow, lo=0, hi=59, val=0, big=False)
+        self.sp_plan_m = Spinner(prow, lo=0, hi=59, val=self._cfg.get('plan_m', 0), big=False)
         self.sp_plan_m.pack(side='left')
         self.btn_plan_add = FlatBtn(prow, self.t('plan_add_btn'), self._plan_add,
                                     bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
@@ -1644,7 +1738,7 @@ class App:
         self.plan_list_frame = tk.Frame(self._pc.inner, bg=C1)
         self.plan_list_frame.pack(fill='x', pady=(8, 0))
 
-        self.v_plan_repeat = tk.BooleanVar(value=True)
+        self.v_plan_repeat = tk.BooleanVar(value=self._cfg.get('plan_repeat', True))
         self.chk_plan_repeat = tk.Checkbutton(
             self._pc.inner, text=self.t('plan_repeat'), variable=self.v_plan_repeat,
             bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
@@ -1750,7 +1844,7 @@ class App:
                                      font=('Segoe UI', 8, 'bold'))
         self.lbl_per_chat.pack(anchor='w')
 
-        self.v_btn_try  = tk.BooleanVar(value=True)
+        self.v_btn_try  = tk.BooleanVar(value=self._cfg.get('btn_try', True))
         row_try = tk.Frame(wc, bg=C1)
         row_try.pack(fill='x', pady=(5, 0))
         tk.Checkbutton(row_try, text='Try again', variable=self.v_btn_try,
@@ -1761,7 +1855,7 @@ class App:
                                      bg=C1, fg=DIM, font=('Segoe UI', 7))
         self.lbl_try_desc.pack(side='left')
 
-        self.v_btn_cont = tk.BooleanVar(value=True)
+        self.v_btn_cont = tk.BooleanVar(value=self._cfg.get('btn_cont', True))
         row_cont = tk.Frame(wc, bg=C1)
         row_cont.pack(fill='x', pady=(3, 0))
         tk.Checkbutton(row_cont, text='Continue', variable=self.v_btn_cont,
@@ -1795,7 +1889,7 @@ class App:
         cr.pack(fill='x', pady=(8, 0))
         self.lbl_accuracy = tk.Label(cr, text=self.t('accuracy'), bg=C1, fg=DIM, font=('Segoe UI', 9))
         self.lbl_accuracy.pack(side='left')
-        self.v_conf = tk.DoubleVar(value=0.82)
+        self.v_conf = tk.DoubleVar(value=self._cfg.get('conf', 0.82))
         tk.Scale(cr, from_=0.5, to=0.99, resolution=0.01, orient='horizontal',
                  variable=self.v_conf, bg=C1, fg=DIM, troughcolor=C2,
                  highlightthickness=0, bd=0, length=140, font=('Segoe UI', 7)
@@ -2342,10 +2436,11 @@ class App:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
+    if IS_WIN:
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            pass
     root = tk.Tk()
     root.tk.call('tk', 'scaling', 1.35)
     App(root)

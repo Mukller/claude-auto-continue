@@ -6,6 +6,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.8.0]
+### Added
+- **macOS support** — the app now runs on macOS in addition to Windows. On Mac, Claude
+  Desktop is located via `pgrep`, brought to the foreground via `osascript`, and buttons
+  are found by screenshot template matching (UIA is Windows-only). Sidebar chat switching
+  is not available on Mac, so the app operates on the currently visible chat. Autostart
+  is handled via a `~/Library/LaunchAgents/` plist instead of the Windows registry.
+### Fixed
+- **Light theme readability** — completely reworked light palette with higher contrast
+  ratios: darker mid-tone background (`#dce1e8`), distinct card color, deeper accent blue,
+  and dark near-black text (`#0f1923`) that reads cleanly against light surfaces.
+- **RoundedCard outline** — removed a duplicate polygon vertex that caused `smooth=True`
+  Bézier splines to loop back at the top-left corner, producing a crooked-looking outline.
+- **Ring timer always visible** — the countdown ring is now positioned in a fixed frame
+  between the header and the scrollable card area, so it is always on screen regardless
+  of scroll position.
+- **Theme switch resetting time** — switching between dark/light themes no longer resets
+  the trigger time, plan time, watch interval, button checkboxes, confidence slider, or
+  any other form value. Values are now snapshotted into the settings dict before the
+  widget tree is rebuilt.
+
 ## [3.7.0]
 ### Changed
 - **Rounded cards** — all content cards (trigger, plan, Claude Desktop, templates, history)

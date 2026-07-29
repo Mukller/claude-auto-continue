@@ -78,16 +78,19 @@ except ImportError:
 THEMES = {
     'dark':  dict(BG='#0d1117', C1='#161b22', C2='#21262d', BRD='#30363d',
                   TXT='#e6edf3', DIM='#8b949e', ACC='#58a6ff',
-                  SUC='#3fb950', ERR='#f85149', WARN='#e3b341'),
-    'light': dict(BG='#dce1e8', C1='#f0f4f8', C2='#c4cdd8', BRD='#8fa0b0',
-                  TXT='#0f1923', DIM='#384553', ACC='#1a5fb4',
-                  SUC='#1a6e35', ERR='#b81c2e', WARN='#7a4200'),
+                  SUC='#3fb950', ERR='#f85149', WARN='#e3b341',
+                  TRK='#3d444d'),
+    'light': dict(BG='#f6f8fa', C1='#ffffff', C2='#eaeef2', BRD='#d0d7de',
+                  TXT='#1f2328', DIM='#57606a', ACC='#0969da',
+                  SUC='#1a7f37', ERR='#cf222e', WARN='#9a6700',
+                  TRK='#b0b7c0'),
 }
 
 # ── Палитра (по умолчанию dark; перезаписывается _apply_theme_vars) ───────────
 BG, C1, C2 = "#0d1117", "#161b22", "#21262d"
 ACC, TXT, DIM = "#58a6ff", "#e6edf3", "#8b949e"
 SUC, ERR, WARN, BRD = "#3fb950", "#f85149", "#e3b341", "#30363d"
+TRK = "#3d444d"
 
 # ── Переводы интерфейса (меню/кнопки/статусы) ────────────────────────────────
 # Движок (find_claude_windows/run_cycle и т.п.) логирует диагностику только
@@ -186,6 +189,12 @@ I18N = {
         'notif_title': 'Claude Auto-Continue',
         'notif_ok': 'Успешно обработано чатов: {n}',
         'notif_fail': 'Ни одного чата не обработано',
+        'retry_stuck_label': '↻ Повторить через 15 мин если нет ответа',
+        'retry_stuck_desc': ' — повторный клик если чат не продолжился',
+        'log_retry_wait': '⏳ Повторная проверка через 15 мин…',
+        'log_retry_check': '↻ 15-мин проверка: ищу зависшие чаты…',
+        'log_retry_ok': '↻ Повторный клик — обработано {n} чат(ов)',
+        'log_retry_skip': '✓ 15-мин проверка: чаты продолжились, повтор не нужен',
     },
     'en': {
         'missing': '⚠ Missing: {deps}\npip install {installs}',
@@ -279,6 +288,12 @@ I18N = {
         'notif_title': 'Claude Auto-Continue',
         'notif_ok': 'Successfully processed {n} chat(s)',
         'notif_fail': 'No chats were processed',
+        'retry_stuck_label': '↻ Retry after 15 min if no response',
+        'retry_stuck_desc': ' — re-click if chat didn\'t continue',
+        'log_retry_wait': '⏳ Will retry in 15 min if no response…',
+        'log_retry_check': '↻ 15-min check: looking for stuck chats…',
+        'log_retry_ok': '↻ Retry click — processed {n} chat(s)',
+        'log_retry_skip': '✓ 15-min check: chats resumed, no retry needed',
     },
 }
 
@@ -819,19 +834,23 @@ class RegionCapture:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class RingTimer(tk.Canvas):
-    SZ, R, W = 200, 80, 10
+    SZ, R, W = 160, 58, 12
 
     def __init__(self, parent, **kw):
         super().__init__(parent, width=self.SZ, height=self.SZ,
                          bg=BG, highlightthickness=0, **kw)
-        self.draw(0, '--:--:--', 'Не запущено', DIM)
+        self._last = (None, None, None, None)
 
     def draw(self, pct, main, sub, color):
+        if (pct, main, sub, color) == self._last:
+            return
+        self._last = (pct, main, sub, color)
         self.delete('all')
         cx = cy = self.SZ // 2
         r, w = self.R, self.W
-        self.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, extent=360,
-                        style='arc', outline=C2, width=w)
+        # Трек: arc с extent=-359.9 надёжнее oval на Windows
+        self.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, extent=-359.9,
+                        style='arc', outline=TRK, width=w)
         if pct > 0.5:
             self.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, extent=-pct*3.6,
                             style='arc', outline=color, width=w)
@@ -839,8 +858,8 @@ class RingTimer(tk.Canvas):
                 ang = math.radians(90 - pct*3.6)
                 ex, ey = cx + r*math.cos(ang), cy - r*math.sin(ang)
                 self.create_oval(ex-w//2, ey-w//2, ex+w//2, ey+w//2, fill=color, outline='')
-        self.create_text(cx, cy-12, text=main, fill=color, font=('Segoe UI Mono', 22, 'bold'))
-        self.create_text(cx, cy+16, text=sub, fill=DIM, font=('Segoe UI', 8))
+        self.create_text(cx, cy-10, text=main, fill=color, font=('Segoe UI Mono', 18, 'bold'))
+        self.create_text(cx, cy+14, text=sub, fill=DIM, font=('Segoe UI', 8))
 
 
 class Spinner(tk.Frame):
@@ -1268,7 +1287,9 @@ class App:
             'conf':        self._sgv('v_conf', self._cfg.get('conf', 0.82)),
             'plan_repeat': self._sgv('v_plan_repeat', self._cfg.get('plan_repeat', True)),
             'notif':       self._sgv('v_notif', self._cfg.get('notif', True)),
+            'retry_stuck': self._sgv('v_retry_stuck', self._cfg.get('retry_stuck', False)),
         })
+        saved_chats = set(self._selected_chat_idx)
         self._save_settings()
         self._theme = name
         self._tick_active = False          # остановить текущий цикл
@@ -1276,6 +1297,8 @@ class App:
             w.destroy()
         self._apply_theme_vars()
         self._build()
+        self._selected_chat_idx = saved_chats
+        self._refresh_chat_list()
         self._tick_active = True           # запустить новый цикл
         self._tick()
 
@@ -1313,6 +1336,7 @@ class App:
             'history': self._history[-10:],
             'tray_minimize': self._tray_minimize.get(),
             'notif': self._sgv('v_notif', True),
+            'retry_stuck': self._sgv('v_retry_stuck', False),
         }
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -1647,6 +1671,19 @@ class App:
         self._log_body.pack_forget()
         self._log_arrow.config(text='▸')
 
+        # ── Фиксированный кольцевой таймер (не прокручивается) ─────────────
+        ring_outer = tk.Frame(self.root, bg=BG)
+        ring_outer.pack(fill='x', side='top', pady=(10, 6))
+        ring_wrap = tk.Frame(ring_outer, bg=BG)
+        ring_wrap.pack()
+        self.ring = RingTimer(ring_wrap)
+        self.ring.pack()
+        self.ring.draw(0, '--:--:--', self.t('ring_idle'), DIM)
+        self.lbl_hint = tk.Label(ring_wrap, text='', bg=BG, fg=DIM,
+                                 font=('Segoe UI', 9))
+        self.lbl_hint.pack(pady=(2, 0))
+        tk.Frame(self.root, bg=BRD, height=1).pack(fill='x', side='top')
+
         # ── Прокручиваемая средняя часть ────────────────────────────────────
         scroll_outer = tk.Frame(self.root, bg=BG)
         scroll_outer.pack(fill='both', expand=True, side='top')
@@ -1668,15 +1705,6 @@ class App:
             self._body_win, width=e.width))
 
         self.root.bind_all('<MouseWheel>', self._dispatch_scroll)
-
-        # ── Кольцевой таймер (первый элемент тела — всегда виден без скролла)
-        ring_wrap = tk.Frame(body, bg=BG, pady=8)
-        ring_wrap.pack()
-        self.ring = RingTimer(ring_wrap)
-        self.ring.pack()
-        self.lbl_hint = tk.Label(ring_wrap, text='', bg=BG, fg=DIM,
-                                 font=('Segoe UI', 8))
-        self.lbl_hint.pack(pady=(2, 0))
 
         # ── Предупреждение о зависимостях ───────────────────────────────────
         self.warn_frame = None
@@ -1885,6 +1913,14 @@ class App:
         self.lbl_cont_desc = tk.Label(row_cont, text=self.t('continue_desc'),
                                       bg=C1, fg=DIM, font=('Segoe UI', 7))
         self.lbl_cont_desc.pack(side='left')
+
+        self.v_retry_stuck = tk.BooleanVar(value=self._cfg.get('retry_stuck', False))
+        row_retry = tk.Frame(wc, bg=C1)
+        row_retry.pack(fill='x', pady=(3, 0))
+        tk.Checkbutton(row_retry, text=self.t('retry_stuck_label'), variable=self.v_retry_stuck,
+                       bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
+                       activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2'
+                       ).pack(side='left')
 
         self.btn_check_now = FlatBtn(wc, self.t('check_now_btn'), self._test_find,
                                      bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
@@ -2264,6 +2300,24 @@ class App:
             self.root.after(0, lambda: self.ring.draw(100, '✗', self.t('ring_fail'), ERR))
             self._slog(self.t('log_fail'), 'error')
 
+        # ── 15-мин повтор если нет ответа ───────────────────────────────────
+        if ok and hasattr(self, 'v_retry_stuck') and self.v_retry_stuck.get():
+            if not self._stop_evt.is_set():
+                self._slog(self.t('log_retry_wait'), 'dim')
+                self._stop_evt.wait(15 * 60)
+            if not self._stop_evt.is_set():
+                self._slog(self.t('log_retry_check'), 'warn')
+                retry_indices = sorted(self._selected_chat_idx) or [0]
+                retry_ok = run_cycle(retry_indices, self.v_btn_try.get(),
+                                     False,  # не нажимаем Enter при retry
+                                     self.v_conf.get(), self._slog, self._badge)
+                if retry_ok:
+                    self._stat_click(retry_ok)
+                    self._add_history(retry_ok)
+                    self._slog(self.t('log_retry_ok', n=retry_ok), 'warn')
+                else:
+                    self._slog(self.t('log_retry_skip'), 'dim')
+
         if self.v_watch.get() and not self._stop_evt.is_set():
             iv = int(self.v_interval.get() or 30)
             self._slog(self.t('log_watch', n=iv), 'dim')
@@ -2342,12 +2396,13 @@ class App:
         chips_row.pack(anchor='w', fill='x')
         for hm in self._plan:
             h, m = hm
-            chip = tk.Frame(chips_row, bg=C2, padx=8, pady=4,
-                            highlightthickness=1, highlightbackground=BRD)
-            chip.pack(side='left', padx=(0, 6), pady=2)
+            outer = tk.Frame(chips_row, bg=BRD, padx=1, pady=1)
+            outer.pack(side='left', padx=(0, 6), pady=2)
+            chip = tk.Frame(outer, bg=C2, padx=8, pady=3)
+            chip.pack()
             tk.Label(chip, text=f'{h:02d}:{m:02d}', bg=C2, fg=TXT,
-                     font=('Segoe UI Mono', 9, 'bold')).pack(side='left')
-            rm = tk.Label(chip, text=' ✕', bg=C2, fg=DIM, font=('Segoe UI', 8), cursor='hand2')
+                     font=('Segoe UI Mono', 10, 'bold')).pack(side='left')
+            rm = tk.Label(chip, text='  ✕', bg=C2, fg=DIM, font=('Segoe UI', 9), cursor='hand2')
             rm.pack(side='left')
             rm.bind('<Button-1>', lambda _e, hm=hm: self._plan_remove(hm))
             rm.bind('<Enter>', lambda _e, w=rm: w.config(fg=ERR))

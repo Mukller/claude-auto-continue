@@ -463,7 +463,7 @@ def _find_sidebar_container(window_ctrl, max_depth=15):
             rect = ctrl.BoundingRectangle
             if (ctrl is not window_ctrl and rect
                     and rect.left - wrect.left < 60
-                    and 200 <= rect.width() <= 360
+                    and 180 <= rect.width() <= 500
                     and rect.height() > 300):
                 return ctrl
             child = ctrl.GetFirstChildControl()
@@ -529,7 +529,7 @@ def find_sidebar_chats(window_ctrl, log_fn, max_nodes=6000, time_budget=4.0) -> 
             if ctrl.ControlTypeName == 'ButtonControl':
                 name = (ctrl.Name or '').strip()
                 rect = ctrl.BoundingRectangle
-                if (rect and 20 <= rect.height() <= 32 and rect.width() >= 150
+                if (rect and 16 <= rect.height() <= 56 and rect.width() >= 120
                         and _is_real_chat_name(name)):
                     key = (name, rect.top // 10)
                     if key not in seen_keys:

@@ -2529,3 +2529,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# Author: Anton Petnitsky
+# GitHub: https://github.com/Mukller/claude-auto-continue
+# Last modified: 2026-07-29 22:43:18 +0300

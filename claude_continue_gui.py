@@ -24,7 +24,7 @@ try:
 except ImportError:
     _fatal("tkinter не найден. Переустановите Python с поддержкой Tkinter.")
 
-import threading, time, datetime, math, ctypes, json
+import threading, time, datetime, math, ctypes, json, re
 from collections import deque
 if IS_WIN:
     from ctypes import wintypes
@@ -195,6 +195,13 @@ I18N = {
         'log_retry_check': '↻ 15-мин проверка: ищу зависшие чаты…',
         'log_retry_ok': '↻ Повторный клик — обработано {n} чат(ов)',
         'log_retry_skip': '✓ 15-мин проверка: чаты продолжились, повтор не нужен',
+        'limit_tracker_title': '⏱ Трекер лимита',
+        'limit_tracker_btn': '🔍 Найти время сброса',
+        'limit_tracker_not_found': 'Сообщение о лимите не обнаружено',
+        'limit_tracker_found': 'Лимит сбросится в {time}',
+        'limit_tracker_add_btn': '+ Добавить в план',
+        'limit_tracker_added': '✓ Добавлено в план: {time}',
+        'limit_tracker_hint': 'Читает сообщение Claude Desktop об ограничении',
     },
     'en': {
         'missing': '⚠ Missing: {deps}\npip install {installs}',
@@ -294,6 +301,13 @@ I18N = {
         'log_retry_check': '↻ 15-min check: looking for stuck chats…',
         'log_retry_ok': '↻ Retry click — processed {n} chat(s)',
         'log_retry_skip': '✓ 15-min check: chats resumed, no retry needed',
+        'limit_tracker_title': '⏱ Limit Tracker',
+        'limit_tracker_btn': '🔍 Find reset time',
+        'limit_tracker_not_found': 'No rate-limit message detected',
+        'limit_tracker_found': 'Limit resets at {time}',
+        'limit_tracker_add_btn': '+ Add to plan',
+        'limit_tracker_added': '✓ Added to plan: {time}',
+        'limit_tracker_hint': 'Reads the rate-limit message from Claude Desktop',
     },
 }
 
@@ -431,7 +445,7 @@ SIDEBAR_CHROME = {
     'back', 'collapse sidebar', 'expand sidebar', 'forward', 'menu', 'search',
     'sidebar', 'mode', 'chat', 'code', 'cowork', 'new session', 'routines',
     'dispatch', 'dispatch beta', 'beta', 'customize', 'more navigation items',
-    'pinned', 'recents', 'filter',
+    'pinned', 'recents', 'filter', 'home', 'new',
 }
 SIDEBAR_CHROME_PREFIXES = ('more options for ', 'show ', 'relaunch to update')
 
@@ -691,6 +705,104 @@ def template_fallback_click(labels: list, confidence: float,
 
 TRY_AGAIN_LABELS = ['Try again', 'try again', 'Retry', 'Попробовать снова']
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  ТРЕКЕР ЛИМИТА: поиск времени сброса в тексте окна Claude
+# ══════════════════════════════════════════════════════════════════════════════
+
+_LIMIT_ABS = [
+    # "resets at 3:45 PM / 15:30"
+    re.compile(r'reset[s]?\s+at\s+(\d{1,2}):(\d{2})\s*([APap][Mm])?', re.I),
+    re.compile(r'available\s+(?:again\s+)?at\s+(\d{1,2}):(\d{2})\s*([APap][Mm])?', re.I),
+    re.compile(r'try\s+again\s+after\s+(\d{1,2}):(\d{2})\s*([APap][Mm])?', re.I),
+    # Russian: "сбросится в 15:30"
+    re.compile(r'сбросится\s+в\s+(\d{1,2}):(\d{2})', re.I),
+    re.compile(r'обновится\s+в\s+(\d{1,2}):(\d{2})', re.I),
+    re.compile(r'станет\s+доступно\s+в\s+(\d{1,2}):(\d{2})', re.I),
+    re.compile(r'доступно\s+в\s+(\d{1,2}):(\d{2})', re.I),
+]
+_LIMIT_DUR = [
+    # "in 3 hours 45 minutes" / "in 45 minutes" / "in 3 hours"
+    re.compile(r'in\s+(\d+)\s+hours?\s+(?:and\s+)?(\d+)\s+minutes?', re.I),
+    re.compile(r'in\s+(\d+)\s+hours?(?!\s+and)', re.I),
+    re.compile(r'in\s+(\d+)\s+minutes?', re.I),
+    # Russian
+    re.compile(r'через\s+(\d+)\s+час[а-я]*\s+(?:и\s+)?(\d+)\s+минут', re.I),
+    re.compile(r'через\s+(\d+)\s+час[а-я]*(?!\s+и)', re.I),
+    re.compile(r'через\s+(\d+)\s+минут', re.I),
+]
+
+
+def _collect_window_text(root_ctrl, max_nodes=10000, time_budget=5.0) -> str:
+    """Собрать весь текст из дерева UI-элементов окна."""
+    parts = []
+    stack = [root_ctrl]
+    visited = 0
+    start = time.time()
+    while stack:
+        if visited > max_nodes or time.time() - start > time_budget:
+            break
+        ctrl = stack.pop()
+        visited += 1
+        try:
+            name = (ctrl.Name or '').strip()
+            if name:
+                parts.append(name)
+            child = ctrl.GetFirstChildControl()
+            kids = []
+            while child:
+                kids.append(child)
+                child = child.GetNextSiblingControl()
+            stack.extend(kids)
+        except Exception:
+            continue
+    return ' '.join(parts)
+
+
+def find_rate_limit_reset(window_ctrl, log_fn) -> tuple:
+    """Вернуть (hour, minute) времени сброса лимита или None.
+    Ищет: абсолютное время ('resets at HH:MM') или
+    длительность ('in X hours Y minutes') и считает от now."""
+    if not HAS_UIA or window_ctrl is None:
+        return None
+    text = _collect_window_text(window_ctrl)
+    if not text:
+        return None
+
+    # Сначала ищем абсолютное время
+    for pat in _LIMIT_ABS:
+        m = pat.search(text)
+        if m:
+            h, mn = int(m.group(1)), int(m.group(2))
+            ampm = m.group(3).upper() if len(m.groups()) >= 3 and m.group(3) else ''
+            if ampm == 'PM' and h < 12:
+                h += 12
+            elif ampm == 'AM' and h == 12:
+                h = 0
+            if 0 <= h <= 23 and 0 <= mn <= 59:
+                log_fn(f'  Трекер: найдено абс. время сброса {h:02d}:{mn:02d}', 'dim')
+                return (h, mn)
+
+    # Потом ищем длительность (in X hours Y minutes)
+    for pat in _LIMIT_DUR:
+        m = pat.search(text)
+        if m:
+            groups = [int(x) for x in m.groups() if x is not None]
+            if len(groups) == 2:
+                delta = datetime.timedelta(hours=groups[0], minutes=groups[1])
+            elif len(groups) == 1:
+                # определяем — часы или минуты — по группе паттерна
+                src = pat.pattern.lower()
+                delta = (datetime.timedelta(hours=groups[0])
+                         if 'hour' in src or 'час' in src
+                         else datetime.timedelta(minutes=groups[0]))
+            else:
+                continue
+            reset_dt = datetime.datetime.now() + delta
+            log_fn(f'  Трекер: через {delta}, сброс в {reset_dt.strftime("%H:%M")}', 'dim')
+            return (reset_dt.hour, reset_dt.minute)
+
+    return None
+
 
 def run_cycle(n_or_indices, search_try_again: bool, auto_continue: bool, confidence: float,
              log_fn, badge_fn=None) -> int:
@@ -834,7 +946,7 @@ class RegionCapture:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class RingTimer(tk.Canvas):
-    SZ, R, W = 160, 58, 12
+    SZ, R, W = 210, 82, 14
 
     def __init__(self, parent, **kw):
         super().__init__(parent, width=self.SZ, height=self.SZ,
@@ -858,8 +970,8 @@ class RingTimer(tk.Canvas):
                 ang = math.radians(90 - pct*3.6)
                 ex, ey = cx + r*math.cos(ang), cy - r*math.sin(ang)
                 self.create_oval(ex-w//2, ey-w//2, ex+w//2, ey+w//2, fill=color, outline='')
-        self.create_text(cx, cy-10, text=main, fill=color, font=('Segoe UI Mono', 18, 'bold'))
-        self.create_text(cx, cy+14, text=sub, fill=DIM, font=('Segoe UI', 8))
+        self.create_text(cx, cy-14, text=main, fill=color, font=('Segoe UI Mono', 22, 'bold'))
+        self.create_text(cx, cy+18, text=sub, fill=DIM, font=('Segoe UI', 9))
 
 
 class Spinner(tk.Frame):
@@ -1251,6 +1363,7 @@ class App:
         self._build()
         self._tick()
         self._scan_now()
+        self._try_restore_pending()
         root.protocol('WM_DELETE_WINDOW', self._on_close)
 
     def t(self, key, **kw):
@@ -1319,6 +1432,9 @@ class App:
         self._cfg_tray_minimize = d.get('tray_minimize', True)
 
     def _save_settings(self):
+        pending = ''
+        if self._running and hasattr(self, '_target'):
+            pending = self._target.isoformat()
         d = {
             'lang': self.lang,
             'theme': self._theme,
@@ -1337,6 +1453,7 @@ class App:
             'tray_minimize': self._tray_minimize.get(),
             'notif': self._sgv('v_notif', True),
             'retry_stuck': self._sgv('v_retry_stuck', False),
+            'pending_iso': pending,
         }
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -1351,6 +1468,20 @@ class App:
     def _sgv(self, attr, default):
         try: return getattr(self, attr).get()
         except Exception: return default
+
+    def _try_restore_pending(self):
+        """Если при последнем запуске таймер был активен и цель ещё в будущем — восстановить."""
+        iso = self._cfg.get('pending_iso', '')
+        if not iso:
+            return
+        try:
+            t = datetime.datetime.fromisoformat(iso)
+            if t > datetime.datetime.now() + datetime.timedelta(minutes=1):
+                self.sp_h.set(t.hour)
+                self.sp_m.set(t.minute)
+                self.root.after(800, self._start)
+        except Exception:
+            pass
 
     def _on_close(self):
         if HAS_TRAY and self._tray_minimize.get():
@@ -1922,11 +2053,6 @@ class App:
                        activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2'
                        ).pack(side='left')
 
-        self.btn_check_now = FlatBtn(wc, self.t('check_now_btn'), self._test_find,
-                                     bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
-                                     font=('Segoe UI', 8), padx=10, pady=6)
-        self.btn_check_now.pack(fill='x', pady=(10, 0))
-
         # ── Резервный вариант: шаблоны ───────────────────────────────────────
         tk.Frame(body, bg=BG, height=10).pack()
         _tc2_card = RoundedCard(body, radius=12, fill=C1, outline=BRD,
@@ -1950,6 +2076,10 @@ class App:
                  variable=self.v_conf, bg=C1, fg=DIM, troughcolor=C2,
                  highlightthickness=0, bd=0, length=140, font=('Segoe UI', 7)
                  ).pack(side='left', padx=8)
+        self.btn_check_now = FlatBtn(tc2, self.t('check_now_btn'), self._test_find,
+                                     bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                                     font=('Segoe UI', 8), padx=10, pady=6)
+        self.btn_check_now.pack(fill='x', pady=(10, 0))
 
         # ── Бейджи ───────────────────────────────────────────────────────────
         tk.Frame(body, bg=BG, height=8).pack()
@@ -1962,6 +2092,35 @@ class App:
         self.lbl_stats = tk.Label(body, text='', bg=BG, fg=SUC,
                                   font=('Segoe UI', 8), anchor='w')
         self.lbl_stats.pack(fill='x', padx=2, pady=(6, 0))
+
+        # ── Трекер лимита ────────────────────────────────────────────────────
+        tk.Frame(body, bg=BG, height=8).pack()
+        _lt_card = RoundedCard(body, radius=12, fill=C1, outline=BRD,
+                               ipadx=14, ipady=10)
+        _lt_card.pack(fill='x')
+        lt = _lt_card.inner
+        lt_hdr = tk.Frame(lt, bg=C1)
+        lt_hdr.pack(fill='x', pady=(0, 6))
+        self.lbl_lt_title = tk.Label(lt_hdr, text=self.t('limit_tracker_title'),
+                                     bg=C1, fg=DIM, font=('Segoe UI', 9, 'bold'))
+        self.lbl_lt_title.pack(side='left')
+        self.lbl_lt_hint = tk.Label(lt_hdr, text=self.t('limit_tracker_hint'),
+                                    bg=C1, fg=DIM, font=('Segoe UI', 7))
+        self.lbl_lt_hint.pack(side='left', padx=(6, 0))
+        lt_row = tk.Frame(lt, bg=C1)
+        lt_row.pack(fill='x')
+        self.btn_lt_scan = FlatBtn(lt_row, self.t('limit_tracker_btn'), self._lt_scan,
+                                   bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                                   font=('Segoe UI', 8), padx=10, pady=5)
+        self.btn_lt_scan.pack(side='left')
+        self.btn_lt_add = FlatBtn(lt_row, self.t('limit_tracker_add_btn'), self._lt_add_to_plan,
+                                  bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+                                  font=('Segoe UI', 8), padx=10, pady=5)
+        self.btn_lt_add.pack(side='left', padx=(6, 0))
+        self.lbl_lt_result = tk.Label(lt, text='', bg=C1, fg=ACC,
+                                      font=('Segoe UI', 9), anchor='w')
+        self.lbl_lt_result.pack(fill='x', pady=(6, 0))
+        self._lt_reset_hm = None  # (hour, minute) последнего найденного сброса
 
         # ── История срабатываний ──────────────────────────────────────────────
         tk.Frame(body, bg=BG, height=8).pack()
@@ -2008,6 +2167,10 @@ class App:
         self.lbl_cont_desc.config(text=self.t('continue_desc'))
         self.btn_check_now.config(text=self.t('check_now_btn'))
         self.lbl_fallback_title.config(text=self.t('fallback_title'))
+        self.lbl_lt_title.config(text=self.t('limit_tracker_title'))
+        self.lbl_lt_hint.config(text=self.t('limit_tracker_hint'))
+        self.btn_lt_scan.config(text=self.t('limit_tracker_btn'))
+        self.btn_lt_add.config(text=self.t('limit_tracker_add_btn'))
         self.lbl_accuracy.config(text=self.t('accuracy'))
         self.lbl_log_title.config(text=self.t('log_title'))
         self.btn_clear.config(text=self.t('clear_btn'))
@@ -2268,6 +2431,7 @@ class App:
         self.lbl_hint.config(text=f'→ {self._target.strftime("%d.%m.%Y  %H:%M")}')
         self._log(self.t('log_started', time=self._target.strftime("%d.%m %H:%M")), 'accent')
         self._tc.set_outline(ACC)
+        self._save_settings()  # сохранить h:m + pending_iso немедленно
         threading.Thread(target=self._worker, daemon=True).start()
 
     def _worker(self):
@@ -2368,6 +2532,40 @@ class App:
             if self.v_btn_cont.get():
                 self._slog(self.t('log_cont_note'), 'dim')
         threading.Thread(target=run, daemon=True).start()
+
+    def _lt_scan(self):
+        def run():
+            self.root.after(0, lambda: self.lbl_lt_result.config(text='…', fg=DIM))
+            windows = find_claude_windows(self._slog)
+            if not windows:
+                self.root.after(0, lambda: self.lbl_lt_result.config(
+                    text=self.t('log_no_app'), fg=ERR))
+                return
+            result = find_rate_limit_reset(windows[0]['ctrl'], self._slog)
+            if result:
+                h, m = result
+                self._lt_reset_hm = (h, m)
+                txt = self.t('limit_tracker_found', time=f'{h:02d}:{m:02d}')
+                self.root.after(0, lambda: self.lbl_lt_result.config(text=txt, fg=ACC))
+            else:
+                self._lt_reset_hm = None
+                self.root.after(0, lambda: self.lbl_lt_result.config(
+                    text=self.t('limit_tracker_not_found'), fg=DIM))
+        threading.Thread(target=run, daemon=True).start()
+
+    def _lt_add_to_plan(self):
+        if not self._lt_reset_hm:
+            return
+        h, m = self._lt_reset_hm
+        entry = (h, m)
+        if entry not in self._plan:
+            self._plan.append(entry)
+            self._plan.sort()
+            self._refresh_plan_list()
+            self._update_plan_status()
+            self._save_settings()
+        txt = self.t('limit_tracker_added', time=f'{h:02d}:{m:02d}')
+        self.lbl_lt_result.config(text=txt, fg=SUC)
 
     # ── План запусков (несколько времён/циклов) ──────────────────────────────
 

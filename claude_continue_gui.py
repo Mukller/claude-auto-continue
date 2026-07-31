@@ -2547,6 +2547,7 @@ class App:
                 self._lt_reset_hm = (h, m)
                 txt = self.t('limit_tracker_found', time=f'{h:02d}:{m:02d}')
                 self.root.after(0, lambda: self.lbl_lt_result.config(text=txt, fg=ACC))
+                self.root.after(0, self._lt_add_to_plan)
             else:
                 self._lt_reset_hm = None
                 self.root.after(0, lambda: self.lbl_lt_result.config(

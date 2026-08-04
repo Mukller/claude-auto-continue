@@ -6,6 +6,13 @@
 
 # ⚡ Claude Code Auto-Continue
 
+<p align="center">
+  <a href="https://github.com/Mukller">
+    <img src="https://img.shields.io/badge/Anton%20Petnitsky-Developer-0d1117?style=for-the-badge&logo=github&logoColor=white&labelColor=0d1117&color=58a6ff" alt="Anton Petnitsky" />
+  </a>
+</p>
+
+
 Автоматически находит и нажимает кнопку **Try again** в Claude Desktop по расписанию — когда сервер временно ограничивает запросы (rate limit). Умеет переключаться между несколькими чатами в сайдбаре одного окна и нажимать **Enter**, чтобы продолжить сессию, которая просто ждёт ввода после исчерпания лимита.
 
 Кнопка ищется через **UI Automation по тексту** (Windows) или по **скриншоту-шаблону** (macOS). Electron-приложения часто не проставляют элементам правильную ARIA-роль, поэтому поиск идёт по видимому тексту на любом типе элемента.

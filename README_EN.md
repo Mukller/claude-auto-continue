@@ -6,6 +6,13 @@
 
 # ⚡ Claude Code Auto-Continue
 
+<p align="center">
+  <a href="https://github.com/Mukller">
+    <img src="https://img.shields.io/badge/Anton%20Petnitsky-Developer-0d1117?style=for-the-badge&logo=github&logoColor=white&labelColor=0d1117&color=58a6ff" alt="Anton Petnitsky" />
+  </a>
+</p>
+
+
 Automatically finds and clicks the **Try again** button in Claude Desktop on a schedule — when the server temporarily rate-limits requests. It can switch between multiple chats in a single window's sidebar and press **Enter** to resume a session that's simply waiting for input after hitting a usage limit.
 
 The button is located via **UI Automation text search** (Windows) or **screenshot template matching** (macOS). Electron apps often don't assign the correct ARIA role to their elements, so the search matches visible text on any control type.

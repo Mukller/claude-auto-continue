@@ -2558,6 +2558,9 @@ class App:
         if not self._lt_reset_hm:
             return
         h, m = self._lt_reset_hm
+        # +5 минут запаса, чтобы лимит точно успел сброситься
+        dt = datetime.datetime(2000, 1, 1, h, m) + datetime.timedelta(minutes=5)
+        h, m = dt.hour, dt.minute
         entry = (h, m)
         if entry not in self._plan:
             self._plan.append(entry)

@@ -202,6 +202,9 @@ I18N = {
         'limit_tracker_add_btn': '+ Добавить в план',
         'limit_tracker_added': '✓ Добавлено в план: {time}',
         'limit_tracker_hint': 'Читает сообщение Claude Desktop об ограничении',
+        'limit_tracker_auto': '🔄 Автопоиск каждые 30 мин',
+        'limit_tracker_scanning': 'Сканирую…',
+        'limit_tracker_last': 'Последний поиск: {time} → {chat}',
     },
     'en': {
         'missing': '⚠ Missing: {deps}\npip install {installs}',
@@ -308,6 +311,9 @@ I18N = {
         'limit_tracker_add_btn': '+ Add to plan',
         'limit_tracker_added': '✓ Added to plan: {time}',
         'limit_tracker_hint': 'Reads the rate-limit message from Claude Desktop',
+        'limit_tracker_auto': '🔄 Auto-scan every 30 min',
+        'limit_tracker_scanning': 'Scanning…',
+        'limit_tracker_last': 'Last scan: {time} → {chat}',
     },
 }
 
@@ -732,17 +738,19 @@ _LIMIT_DUR = [
 ]
 
 
-def _collect_window_text(root_ctrl, max_nodes=10000, time_budget=5.0) -> str:
-    """Собрать весь текст из дерева UI-элементов окна."""
+def _collect_window_text(root_ctrl, max_nodes=50000, time_budget=15.0) -> str:
+    """Собрать весь текст из дерева UI-элементов окна (без ограничений)."""
     parts = []
     stack = [root_ctrl]
     visited = 0
     start = time.time()
     while stack:
-        if visited > max_nodes or time.time() - start > time_budget:
+        if time.time() - start > time_budget:
             break
         ctrl = stack.pop()
         visited += 1
+        if visited > max_nodes:
+            break
         try:
             name = (ctrl.Name or '').strip()
             if name:
@@ -756,6 +764,37 @@ def _collect_window_text(root_ctrl, max_nodes=10000, time_budget=5.0) -> str:
         except Exception:
             continue
     return ' '.join(parts)
+
+
+def find_limit_in_all_chats(window, log_fn) -> tuple:
+    """Сканирует ВСЕ чаты в сайдбаре и ищет сообщение о сбросе лимита.
+    Возвращает (h, m, chat_name) или None."""
+    if not HAS_UIA or window is None:
+        return None
+    window_ctrl = window.get('ctrl')
+    if not window_ctrl:
+        return None
+
+    chats = find_sidebar_chats(window_ctrl, log_fn)
+    if not chats:
+        log_fn('  Чаты не найдены в сайдбаре', 'dim')
+        return None
+
+    log_fn(f'  Сканирую {len(chats)} чатов…', 'dim')
+    for i, chat in enumerate(chats):
+        log_fn(f'    Чат {i+1}/{len(chats)}: {chat["name"][:40]}…', 'dim')
+        try:
+            click_rect(chat['rect'], log_fn)
+            time.sleep(1.5)  # дать чату загрузиться
+            result = find_rate_limit_reset(window_ctrl, log_fn)
+            if result:
+                h, m = result
+                log_fn(f'  ✓ Найден сброс в {h:02d}:{m:02d} (чат: {chat["name"][:50]})', 'success')
+                return (h, m, chat["name"])
+        except Exception as e:
+            log_fn(f'    Ошибка при сканировании: {e}', 'dim')
+            continue
+    return None
 
 
 def find_rate_limit_reset(window_ctrl, log_fn) -> tuple:
@@ -1454,6 +1493,7 @@ class App:
             'notif': self._sgv('v_notif', True),
             'retry_stuck': self._sgv('v_retry_stuck', False),
             'pending_iso': pending,
+            'lt_auto': self._sgv('v_lt_auto', False),
         }
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -2120,7 +2160,21 @@ class App:
         self.lbl_lt_result = tk.Label(lt, text='', bg=C1, fg=ACC,
                                       font=('Segoe UI', 9), anchor='w')
         self.lbl_lt_result.pack(fill='x', pady=(6, 0))
+        self.v_lt_auto = tk.BooleanVar(value=self._cfg.get('lt_auto', False))
+        self.chk_lt_auto = tk.Checkbutton(lt, text=self.t('limit_tracker_auto'),
+                                          variable=self.v_lt_auto,
+                                          bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
+                                          activeforeground=TXT, font=('Segoe UI', 8),
+                                          command=self._lt_toggle_auto, cursor='hand2')
+        self.chk_lt_auto.pack(anchor='w', pady=(8, 0))
+        self.lbl_lt_status = tk.Label(lt, text='', bg=C1, fg=DIM,
+                                      font=('Segoe UI', 8), anchor='w')
+        self.lbl_lt_status.pack(fill='x', pady=(2, 0))
         self._lt_reset_hm = None  # (hour, minute) последнего найденного сброса
+        self._lt_last_scan = None  # время последнего сканирования
+        self._lt_last_chat = None  # имя чата где найден лимит
+        self._lt_auto_stop_evt = threading.Event()
+        self._lt_auto_stop_evt.set()  # изначально не сканируем
 
         # ── История срабатываний ──────────────────────────────────────────────
         tk.Frame(body, bg=BG, height=8).pack()
@@ -2171,6 +2225,7 @@ class App:
         self.lbl_lt_hint.config(text=self.t('limit_tracker_hint'))
         self.btn_lt_scan.config(text=self.t('limit_tracker_btn'))
         self.btn_lt_add.config(text=self.t('limit_tracker_add_btn'))
+        self.chk_lt_auto.config(text=self.t('limit_tracker_auto'))
         self.lbl_accuracy.config(text=self.t('accuracy'))
         self.lbl_log_title.config(text=self.t('log_title'))
         self.btn_clear.config(text=self.t('clear_btn'))
@@ -2535,21 +2590,24 @@ class App:
 
     def _lt_scan(self):
         def run():
-            self.root.after(0, lambda: self.lbl_lt_result.config(text='…', fg=DIM))
+            self.root.after(0, lambda: self.lbl_lt_result.config(text=self.t('limit_tracker_scanning'), fg=DIM))
             windows = find_claude_windows(self._slog)
             if not windows:
                 self.root.after(0, lambda: self.lbl_lt_result.config(
                     text=self.t('log_no_app'), fg=ERR))
                 return
-            result = find_rate_limit_reset(windows[0]['ctrl'], self._slog)
+            result = find_limit_in_all_chats(windows[0], self._slog)
             if result:
-                h, m = result
+                h, m, chat_name = result
                 self._lt_reset_hm = (h, m)
+                self._lt_last_scan = datetime.datetime.now()
+                self._lt_last_chat = chat_name
                 txt = self.t('limit_tracker_found', time=f'{h:02d}:{m:02d}')
                 self.root.after(0, lambda: self.lbl_lt_result.config(text=txt, fg=ACC))
                 self.root.after(0, self._lt_add_to_plan)
             else:
                 self._lt_reset_hm = None
+                self._lt_last_scan = datetime.datetime.now()
                 self.root.after(0, lambda: self.lbl_lt_result.config(
                     text=self.t('limit_tracker_not_found'), fg=DIM))
         threading.Thread(target=run, daemon=True).start()
@@ -2570,6 +2628,35 @@ class App:
             self._save_settings()
         txt = self.t('limit_tracker_added', time=f'{h:02d}:{m:02d}')
         self.lbl_lt_result.config(text=txt, fg=SUC)
+
+    def _lt_toggle_auto(self):
+        """Включить/выключить автосканирование каждые 30 минут."""
+        if self.v_lt_auto.get():
+            self._lt_auto_stop_evt.clear()
+            self._save_settings()
+            threading.Thread(target=self._lt_auto_worker, daemon=True).start()
+            self._slog('Автосканирование лимита включено', 'dim')
+        else:
+            self._lt_auto_stop_evt.set()
+            self._save_settings()
+            self._slog('Автосканирование лимита выключено', 'dim')
+
+    def _lt_auto_worker(self):
+        """Фоновый worker — сканирует лимит каждые 30 минут."""
+        while not self._lt_auto_stop_evt.is_set():
+            self._lt_auto_stop_evt.wait(30 * 60)  # ждём 30 минут
+            if not self._lt_auto_stop_evt.is_set():
+                self._lt_scan()
+                if self._lt_reset_hm and not self._stop_evt.is_set():
+                    # если таймер НЕ запущен и нашли лимит — добавляем в план
+                    if not self._running:
+                        self.root.after(0, self._lt_add_to_plan)
+                # обновим статус последнего сканирования
+                if self._lt_last_scan:
+                    t_str = self._lt_last_scan.strftime('%H:%M')
+                    chat_str = self._lt_last_chat[:30] if self._lt_last_chat else '?'
+                    self.root.after(0, lambda: self.lbl_lt_status.config(
+                        text=self.t('limit_tracker_last', time=t_str, chat=chat_str)))
 
     # ── План запусков (несколько времён/циклов) ──────────────────────────────
 

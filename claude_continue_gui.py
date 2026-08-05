@@ -205,6 +205,11 @@ I18N = {
         'limit_tracker_auto': '🔄 Автопоиск каждые 30 мин',
         'limit_tracker_scanning': 'Сканирую…',
         'limit_tracker_last': 'Последний поиск: {time} → {chat}',
+        'limit_tracker_progress': 'Сканирую чат {n}/{total}…',
+        'limit_tracker_next': 'Следующий скан через {min} мин',
+        'limit_tracker_duplicate': '⚠ Дубль! Лимит не сбросился?',
+        'limit_tracker_notif_title': 'Лимит сбросится в {time}',
+        'limit_tracker_found_in': 'Найдено в: {chat}',
     },
     'en': {
         'missing': '⚠ Missing: {deps}\npip install {installs}',
@@ -314,6 +319,11 @@ I18N = {
         'limit_tracker_auto': '🔄 Auto-scan every 30 min',
         'limit_tracker_scanning': 'Scanning…',
         'limit_tracker_last': 'Last scan: {time} → {chat}',
+        'limit_tracker_progress': 'Scanning chat {n}/{total}…',
+        'limit_tracker_next': 'Next scan in {min} min',
+        'limit_tracker_duplicate': '⚠ Duplicate! Limit didn\'t reset?',
+        'limit_tracker_notif_title': 'Limit resets at {time}',
+        'limit_tracker_found_in': 'Found in: {chat}',
     },
 }
 
@@ -1494,6 +1504,7 @@ class App:
             'retry_stuck': self._sgv('v_retry_stuck', False),
             'pending_iso': pending,
             'lt_auto': self._sgv('v_lt_auto', False),
+            'lt_interval': self._sg('sp_lt_interval', 30),
         }
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -2170,9 +2181,27 @@ class App:
         self.lbl_lt_status = tk.Label(lt, text='', bg=C1, fg=DIM,
                                       font=('Segoe UI', 8), anchor='w')
         self.lbl_lt_status.pack(fill='x', pady=(2, 0))
+
+        # Интервал сканирования (15, 30, 45, 60 минут)
+        lt_interval_row = tk.Frame(lt, bg=C1)
+        lt_interval_row.pack(fill='x', pady=(8, 0))
+        tk.Label(lt_interval_row, text='Интервал:', bg=C1, fg=DIM, font=('Segoe UI', 8)).pack(side='left')
+        self.sp_lt_interval = Spinner(lt_interval_row, lo=15, hi=120,
+                                      val=self._cfg.get('lt_interval', 30), big=False)
+        self.sp_lt_interval.pack(side='left', padx=(6, 0))
+        tk.Label(lt_interval_row, text='мин', bg=C1, fg=DIM, font=('Segoe UI', 8)).pack(side='left', padx=(4, 0))
+
+        # История лимитов
+        tk.Label(lt, text='История сбросов:', bg=C1, fg=DIM, font=('Segoe UI', 8, 'bold')).pack(anchor='w', pady=(8, 2))
+        self.lbl_lt_history = tk.Label(lt, text='', bg=C1, fg=DIM, font=('Segoe UI', 7), anchor='w', justify='left')
+        self.lbl_lt_history.pack(fill='x')
+
         self._lt_reset_hm = None  # (hour, minute) последнего найденного сброса
         self._lt_last_scan = None  # время последнего сканирования
         self._lt_last_chat = None  # имя чата где найден лимит
+        self._lt_history = []  # история [time1, time2, time3, ...] последних 3 находок
+        self._lt_prev_time = None  # предыдущее найденное время для проверки дублей
+        self._lt_next_scan_time = None  # время следующего сканирования
         self._lt_auto_stop_evt = threading.Event()
         self._lt_auto_stop_evt.set()  # изначально не сканируем
 
@@ -2226,6 +2255,7 @@ class App:
         self.btn_lt_scan.config(text=self.t('limit_tracker_btn'))
         self.btn_lt_add.config(text=self.t('limit_tracker_add_btn'))
         self.chk_lt_auto.config(text=self.t('limit_tracker_auto'))
+        self._lt_update_history_display()
         self.lbl_accuracy.config(text=self.t('accuracy'))
         self.lbl_log_title.config(text=self.t('log_title'))
         self.btn_clear.config(text=self.t('clear_btn'))
@@ -2599,17 +2629,44 @@ class App:
             result = find_limit_in_all_chats(windows[0], self._slog)
             if result:
                 h, m, chat_name = result
+                time_str = f'{h:02d}:{m:02d}'
                 self._lt_reset_hm = (h, m)
                 self._lt_last_scan = datetime.datetime.now()
                 self._lt_last_chat = chat_name
-                txt = self.t('limit_tracker_found', time=f'{h:02d}:{m:02d}')
+
+                # История лимитов (последние 3)
+                self._lt_history.insert(0, time_str)
+                if len(self._lt_history) > 3:
+                    self._lt_history.pop()
+
+                # Проверка на дубль (два раза подряд одно время = лимит не сбросился)
+                if self._lt_prev_time == time_str:
+                    self.root.after(0, lambda: self.lbl_lt_result.config(
+                        text=self.t('limit_tracker_duplicate'), fg=WARN))
+                    self.v_lt_auto.set(False)
+                    self._slog(self.t('limit_tracker_duplicate'), 'warn')
+                    self._lt_toggle_auto()
+                    return
+
+                self._lt_prev_time = time_str
+                txt = self.t('limit_tracker_found', time=time_str)
                 self.root.after(0, lambda: self.lbl_lt_result.config(text=txt, fg=ACC))
+                self.root.after(0, self._lt_update_history_display)
                 self.root.after(0, self._lt_add_to_plan)
+                # Уведомление
+                if HAS_NOTIF and self._cfg.get('notif', True):
+                    try:
+                        title = self.t('limit_tracker_notif_title', time=time_str)
+                        msg = self.t('limit_tracker_found_in', chat=chat_name[:40])
+                        _plyer_notif.notify(title=title, message=msg, timeout=10)
+                    except Exception:
+                        pass
             else:
                 self._lt_reset_hm = None
                 self._lt_last_scan = datetime.datetime.now()
                 self.root.after(0, lambda: self.lbl_lt_result.config(
                     text=self.t('limit_tracker_not_found'), fg=DIM))
+                self.root.after(0, self._lt_update_history_display)
         threading.Thread(target=run, daemon=True).start()
 
     def _lt_add_to_plan(self):
@@ -2629,34 +2686,50 @@ class App:
         txt = self.t('limit_tracker_added', time=f'{h:02d}:{m:02d}')
         self.lbl_lt_result.config(text=txt, fg=SUC)
 
+    def _lt_update_history_display(self):
+        """Обновить отображение истории лимитов."""
+        if self._lt_history:
+            txt = '  ' + ', '.join(self._lt_history)
+            self.lbl_lt_history.config(text=txt)
+        else:
+            self.lbl_lt_history.config(text='')
+
     def _lt_toggle_auto(self):
-        """Включить/выключить автосканирование каждые 30 минут."""
+        """Включить/выключить автосканирование."""
         if self.v_lt_auto.get():
             self._lt_auto_stop_evt.clear()
+            self._lt_next_scan_time = datetime.datetime.now()
             self._save_settings()
             threading.Thread(target=self._lt_auto_worker, daemon=True).start()
             self._slog('Автосканирование лимита включено', 'dim')
         else:
             self._lt_auto_stop_evt.set()
+            self._lt_next_scan_time = None
             self._save_settings()
             self._slog('Автосканирование лимита выключено', 'dim')
 
     def _lt_auto_worker(self):
-        """Фоновый worker — сканирует лимит каждые 30 минут."""
+        """Фоновый worker — сканирует лимит каждый интервал (15-120 мин)."""
         while not self._lt_auto_stop_evt.is_set():
-            self._lt_auto_stop_evt.wait(30 * 60)  # ждём 30 минут
+            interval = self.sp_lt_interval.get() * 60  # в секунды
+            self._lt_next_scan_time = datetime.datetime.now() + datetime.timedelta(seconds=interval)
+
+            # Цикл ожидания с обновлением таймера
+            for _ in range(interval):
+                if self._lt_auto_stop_evt.is_set():
+                    return
+                # Каждую секунду обновляем время до следующего сканирования
+                if _ % 10 == 0:  # каждые 10 секунд
+                    if self._lt_next_scan_time:
+                        left = (self._lt_next_scan_time - datetime.datetime.now()).total_seconds()
+                        if left > 0:
+                            min_left = int(left) // 60
+                            self.root.after(0, lambda m=min_left: self.lbl_lt_status.config(
+                                text=self.t('limit_tracker_next', min=m)))
+                self._lt_auto_stop_evt.wait(1)
+
             if not self._lt_auto_stop_evt.is_set():
                 self._lt_scan()
-                if self._lt_reset_hm and not self._stop_evt.is_set():
-                    # если таймер НЕ запущен и нашли лимит — добавляем в план
-                    if not self._running:
-                        self.root.after(0, self._lt_add_to_plan)
-                # обновим статус последнего сканирования
-                if self._lt_last_scan:
-                    t_str = self._lt_last_scan.strftime('%H:%M')
-                    chat_str = self._lt_last_chat[:30] if self._lt_last_chat else '?'
-                    self.root.after(0, lambda: self.lbl_lt_status.config(
-                        text=self.t('limit_tracker_last', time=t_str, chat=chat_str)))
 
     # ── План запусков (несколько времён/циклов) ──────────────────────────────
 

@@ -12,6 +12,8 @@
   </a>
 </p>
 
+> [!NOTE]
+> Anthropic released a Claude Desktop update that added this exact function (automatic continuation after hitting a limit) natively to the app. Because of this, support for this project is currently paused.
 
 Automatically finds and clicks the **Try again** button in Claude Desktop on a schedule — when the server temporarily rate-limits requests. It can switch between multiple chats in a single window's sidebar and press **Enter** to resume a session that's simply waiting for input after hitting a usage limit.
 

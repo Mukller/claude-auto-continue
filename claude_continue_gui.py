@@ -1452,8 +1452,8 @@ class App:
             'retry_stuck': self._sgv('v_retry_stuck', self._cfg.get('retry_stuck', False)),
         })
         saved_chats = set(self._selected_chat_idx)
-        self._save_settings()
         self._theme = name
+        self._save_settings()
         self._tick_active = False          # остановить текущий цикл
         for w in self.root.winfo_children():
             w.destroy()
@@ -2272,6 +2272,7 @@ class App:
         self._refresh_plan_list()
         self._update_plan_status()
         self._update_scan(self._last_windows, self._chats_preview)
+        self._save_settings()
 
     # ── Сворачиваемый / прокручиваемый список чатов ──────────────────────────
 

@@ -369,11 +369,13 @@ def _acquire_single_instance() -> bool:
     mutex; macOS/Linux: flock на lockfile в системном temp."""
     if IS_WIN:
         global _si_mutex
-        _si_mutex = ctypes.windll.kernel32.CreateMutexW(
-            None, False, 'Local\\ClaudeAutoContinue')
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetLastError(0)
+        _si_mutex = kernel32.CreateMutexW(
+            None, False, r'Local\ClaudeAutoContinue')
         # ERROR_ALREADY_EXISTS = 183
         return bool(_si_mutex) and \
-            ctypes.windll.kernel32.GetLastError() != 183
+            kernel32.GetLastError() != 183
     try:
         import fcntl
         global _si_lock_fh

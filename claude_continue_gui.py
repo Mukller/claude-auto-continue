@@ -117,7 +117,6 @@ I18N = {
         'app_not_found': '⚠ Claude Desktop не найден. Открой приложение и нажми «Найти».',
         'app_found_chats': '✓ {title}  —  чатов в сайдбаре: {n}',
         'app_found_no_sidebar': '✓ {title}  —  сайдбар не обнаружен, работаем с текущим видом',
-        'switch_first': 'Переключаться на первые',
         'chats_word': 'чатов',
         'more_chats': '  … ещё {n}',
         'per_chat': 'В каждом чате:',
@@ -239,7 +238,6 @@ I18N = {
         'app_not_found': '⚠ Claude Desktop not found. Open the app and click "Find".',
         'app_found_chats': '✓ {title}  —  chats in sidebar: {n}',
         'app_found_no_sidebar': '✓ {title}  —  sidebar not detected, using current view',
-        'switch_first': 'Switch to the first',
         'chats_word': 'chats',
         'more_chats': '  … {n} more',
         'per_chat': 'For each chat:',
@@ -754,27 +752,39 @@ def template_fallback_click(labels: list, confidence: float,
 
 TRY_AGAIN_LABELS = ['Try again', 'try again', 'Retry', 'Попробовать снова']
 
+# Мышь на машине одна: watch-цикл, план, ручной «Сейчас» и трекер лимита
+# двигают курсор параллельно — без мьютекса клики ломают друг друга.
+_CYCLE_LOCK = threading.Lock()
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  ТРЕКЕР ЛИМИТА: поиск времени сброса в тексте окна Claude
 # ══════════════════════════════════════════════════════════════════════════════
 
 _LIMIT_ABS = [
-    # "resets at 3:45 PM / 15:30"
-    re.compile(r'reset[s]?\s+at\s+(\d{1,2}):(\d{2})\s*([APap][Mm])?', re.I),
-    re.compile(r'available\s+(?:again\s+)?at\s+(\d{1,2}):(\d{2})\s*([APap][Mm])?', re.I),
-    re.compile(r'try\s+again\s+after\s+(\d{1,2}):(\d{2})\s*([APap][Mm])?', re.I),
-    re.compile(r'try\s+again\s+at\s+(\d{1,2}):(\d{2})\s*([APap][Mm])?', re.I),
+    # "resets at 3:45 PM", "resets at 5 PM", "resets at 15:30"
+    re.compile(r'resets?\s+at\s+(\d{1,2})(?::(\d{2}))?\s*([APap]\.?\s?[Mm]\.?)?', re.I),
+    re.compile(r'available\s+(?:again\s+)?at\s+(\d{1,2})(?::(\d{2}))?\s*([APap]\.?\s?[Mm]\.?)?', re.I),
+    re.compile(r'try\s+again\s+after\s+(\d{1,2})(?::(\d{2}))?\s*([APap]\.?\s?[Mm]\.?)?', re.I),
+    re.compile(r'try\s+again\s+at\s+(\d{1,2})(?::(\d{2}))?\s*([APap]\.?\s?[Mm]\.?)?', re.I),
     # Russian: "сбросится в 15:30"
     re.compile(r'сбросится\s+в\s+(\d{1,2}):(\d{2})', re.I),
     re.compile(r'обновится\s+в\s+(\d{1,2}):(\d{2})', re.I),
     re.compile(r'станет\s+доступно\s+в\s+(\d{1,2}):(\d{2})', re.I),
     re.compile(r'доступно\s+в\s+(\d{1,2}):(\d{2})', re.I),
 ]
+_LIMIT_DUR_SPECIALS_PRE = [
+    (re.compile(r'half\s+an?\s+hour', re.I), 30),   # "in half an hour"
+    (re.compile(r'полчаса', re.I), 30),             # "через полчаса"
+    (re.compile(r'полтора\s+часа', re.I), 90),      # "через полтора часа"
+]
 _LIMIT_DUR = [
     # "in 3 hours 45 minutes" / "in 45 minutes" / "in 3 hours"
     re.compile(r'in\s+(\d+)\s+hours?\s+(?:and\s+)?(\d+)\s+minutes?', re.I),
     re.compile(r'in\s+(\d+)\s+hours?(?!\s+and)', re.I),
     re.compile(r'in\s+(\d+)\s+minutes?', re.I),
+    # Словесные формы: "in an hour" / "через час" (после цифровых!)
+    re.compile(r'in\s+an?\s+hour', re.I),
+    re.compile(r'через\s+час\b', re.I),
     # Russian
     re.compile(r'через\s+(\d+)\s+час[а-я]*\s+(?:и\s+)?(\d+)\s+минут', re.I),
     re.compile(r'через\s+(\d+)\s+час[а-я]*(?!\s+и)', re.I),
@@ -823,6 +833,12 @@ def next_reset_occurrence(h: int, m: int) -> datetime.datetime:
 
 
 def find_limit_in_all_chats(window, log_fn, max_chats=30) -> tuple:
+    # Держим _CYCLE_LOCK: скан двигает мышь так же, как run_cycle.
+    with _CYCLE_LOCK:
+        return _find_limit_in_all_chats_impl(window, log_fn, max_chats)
+
+
+def _find_limit_in_all_chats_impl(window, log_fn, max_chats=30) -> tuple:
     """Сканирует чаты в сайдбаре и ищет сообщение о сбросе лимита.
     Возвращает (h, m, chat_name) или None. После скана возвращает окно
     на первый чат — иначе пользователь остаётся в последнем просмотренном."""
@@ -841,11 +857,22 @@ def find_limit_in_all_chats(window, log_fn, max_chats=30) -> tuple:
         log_fn(f'  Чатов {len(chats)} — сканирую первые {max_chats}', 'dim')
         chats = chats[:max_chats]
 
-    first_rect = chats[0]['rect']
+    first_name = chats[0]['name']
+    total = len(chats)
+    scanned = set()
     try:
-        log_fn(f'  Сканирую {len(chats)} чатов…', 'dim')
-        for i, chat in enumerate(chats):
-            log_fn(f'    Чат {i+1}/{len(chats)}: {chat["name"][:40]}…', 'dim')
+        log_fn(f'  Сканирую {total} чатов…', 'dim')
+        # Координаты протухают: кликнутый чат поднимается в топ Recents и все
+        # строки ниже сдвигаются. Перед каждым переходом перечитываем сайдбар
+        # и берём первый ещё не просканированный чат по имени.
+        for _step in range(total + 2):
+            remaining = [c for c in find_sidebar_chats(window_ctrl, log_fn)
+                         if c['name'] not in scanned]
+            if not remaining:
+                break
+            chat = remaining[0]
+            scanned.add(chat['name'])
+            log_fn(f'    Чат {len(scanned)}/{total}: {chat["name"][:40]}…', 'dim')
             try:
                 click_rect(chat['rect'], log_fn)
                 time.sleep(1.5)  # дать чату загрузиться
@@ -860,7 +887,12 @@ def find_limit_in_all_chats(window, log_fn, max_chats=30) -> tuple:
         return None
     finally:
         time.sleep(0.4)
-        click_rect(first_rect, log_fn)
+        # Возвращаемся к первому чату по имени — его координата тоже могла
+        # сместиться за время скана.
+        for c in find_sidebar_chats(window_ctrl, log_fn):
+            if c['name'] == first_name:
+                click_rect(c['rect'], log_fn)
+                break
 
 
 def parse_limit_text(text: str, now=None):
@@ -870,11 +902,21 @@ def parse_limit_text(text: str, now=None):
     if not text:
         return None
 
+    # Словесные формы без чисел ("in half an hour", "через полчаса")
+    low = text.lower()
+    for pat, minutes in _LIMIT_DUR_SPECIALS_PRE:
+        if pat.search(low):
+            reset_dt = (now or datetime.datetime.now()) + datetime.timedelta(minutes=minutes)
+            return (reset_dt.hour, reset_dt.minute)
+
     for pat in _LIMIT_ABS:
         m = pat.search(text)
         if m:
-            h, mn = int(m.group(1)), int(m.group(2))
-            ampm = m.group(3).upper() if len(m.groups()) >= 3 and m.group(3) else ''
+            gs = m.groups()
+            h = int(gs[0])
+            mn = int(gs[1]) if len(gs) > 1 and gs[1] else 0
+            ampm = (gs[2] or '').replace('.', '').replace(' ', '').upper() \
+                if len(gs) > 2 else ''
             if ampm == 'PM' and h < 12:
                 h += 12
             elif ampm == 'AM' and h == 12:
@@ -956,8 +998,14 @@ def _switch_to_chat(window_ctrl, name: str, log_fn) -> bool:
     return False
 
 
-def run_cycle(n_or_indices, search_try_again: bool, auto_continue: bool, confidence: float,
-             log_fn, badge_fn=None) -> int:
+def run_cycle(*args, **kwargs) -> int:
+    """Обёртка сериализации — см. _CYCLE_LOCK. Логика в _run_cycle_impl."""
+    with _CYCLE_LOCK:
+        return _run_cycle_impl(*args, **kwargs)
+
+
+def _run_cycle_impl(n_or_indices, search_try_again: bool, auto_continue: bool,
+                    confidence: float, log_fn, badge_fn=None) -> int:
     """search_try_again — искать и кликать реальную кнопку "Try again" (лимит запросов).
     auto_continue — после захода в чат нажать Enter НЕЗАВИСИМО от того, нашлась ли
     кнопка: обычно после исчерпания лимита Claude Code просто ждёт ввода без всякой
@@ -1542,7 +1590,6 @@ class App:
         self._plan_stop_evt = threading.Event()
         self._plan_next_target = None
         self._tick_gen = 0      # поколение _tick-цепочки (см. _set_theme)
-        self._tick_active = True
 
         self._stat_clicks = 0
         self._stat_ok = 0
@@ -1607,7 +1654,6 @@ class App:
         self._theme = name
         self._save_settings()
         self._tick_gen = getattr(self, '_tick_gen', 0) + 1   # старая цепочка умрёт на следующем колбэке
-        self._tick_active = False          # остановить текущий цикл
         for w in self.root.winfo_children():
             w.destroy()
         self._apply_theme_vars()
@@ -1627,7 +1673,6 @@ class App:
             self.btn_plan_start.recolor(ERR, '#fff', '#ff6b6b')
             self.btn_plan_start.config(text=self.t('plan_stop_btn'))
             self._pc.set_outline(ACC)
-        self._tick_active = True           # запустить новый цикл
         self._tick()                       # новая цепочка (старая погасла по gen)
 
     # ── Настройки ───────────────────────────────────────────────────────────
@@ -2716,8 +2761,6 @@ class App:
         if gen is None:
             gen = self._tick_gen
         elif gen != self._tick_gen:
-            return
-        if not self._tick_active:
             return
         try:
             if self._running and self._target:

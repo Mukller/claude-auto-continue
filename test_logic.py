@@ -297,3 +297,37 @@ def test_profile_persists_via_settings(tmp_path, monkeypatch):
     m.App._save_settings(fake)
     data = __import__('json').load(open(m.SETTINGS_FILE, encoding='utf-8'))
     assert data['profile'] == 'cursor'
+
+
+# --- macOS AX: выбор чатов ---
+
+FLAT = [
+    ('AXButton', 'New chat'),
+    ('AXButton', 'Pinned'),
+    ('AXButton', 'Как сделать cron'),
+    ('AXStaticText', 'Some article text'),
+    ('AXButton', 'Try again'),
+    ('AXButton', 'Retry'),
+    ('AXButton', 'more options for Как сделать'),
+    ('AXButton', 'Как сделать cron'),          # дубликат
+    ('AXButton', ''),                            # пустое
+    ('AXGroup', 'Chat group'),
+]
+
+
+def test_mac_pick_chat_titles_basic():
+    prof = app.APP_PROFILES['claude']
+    out = app.mac_pick_chat_titles(FLAT, prof['button_labels'],
+                                   prof['sidebar_chrome'],
+                                   prof['sidebar_prefixes'])
+    assert out == ['Как сделать cron']
+
+
+def test_mac_pick_chat_titles_max_and_order():
+    seq = [(('AXButton'), 'chat %d' % k) for k in range(50)]
+    out = app.mac_pick_chat_titles(seq, max_items=5)
+    assert len(out) == 5 and out[0] == 'chat 0'
+
+
+def test_mac_empty_tree():
+    assert app.mac_pick_chat_titles([]) == []

@@ -44,6 +44,7 @@ so matching runs on visible text of any element type.
 - **Screenshot fallback** — capture a button template with the mouse
 - **CLI/headless** — night runs without a window, log to file
 - Dark/light theme, system tray, notifications, autostart, stats and trigger history
+- **macOS**: 🧪 sidebar chat switching via Accessibility API (grant the permission when prompted); without pyobjc - current-view mode
 
 ## Install
 

@@ -28,7 +28,7 @@ APP_PROFILES = {
         'sidebar_chrome': {
             'back', 'collapse sidebar', 'expand sidebar', 'forward', 'menu',
             'search', 'sidebar', 'mode', 'chat', 'code', 'cowork',
-            'new session', 'routines', 'dispatch', 'dispatch beta', 'beta',
+            'new session','new chat', 'routines', 'dispatch', 'dispatch beta', 'beta',
             'customize', 'more navigation items', 'pinned', 'recents',
             'filter', 'home', 'new',
         },
@@ -229,6 +229,39 @@ def parse_limit_text(text: str, now=None, require_context: bool = False):
             return (reset_dt.hour, reset_dt.minute)
 
     return None
+
+
+# ── macOS: выбор чатов из AX-дерева ──────────────────────────────────────────
+
+def mac_pick_chat_titles(flat_seq, button_labels=(), sidebar_chrome=frozenset(),
+                         sidebar_prefixes=(), max_items=30):
+    """Из плоского обхода AX-дерева [(role, title), ...] выбрать кандидатов
+    в чаты сайдбара.
+
+    Правила: роль строго AXButton (строки чатов в Claude - кнопки),
+    непустое имя, не обвязка (sidebar_chrome/prefixes), не целевые кнопки
+    действия (Try again/Retry/...). Дедуп по имени, порядок дерева
+    сохраняется (сайдбар идёт раньше контента), максимум max_items."""
+    actions = {b.strip().lower() for b in button_labels}
+    out, seen = [], set()
+    for role, title in flat_seq:
+        if role != 'AXButton':
+            continue
+        t = (title or '').strip()
+        if not t:
+            continue
+        low = t.lower()
+        if low in actions or low in {c.lower() for c in sidebar_chrome}:
+            continue
+        if any(low.startswith(px) for px in sidebar_prefixes):
+            continue
+        if low in seen:
+            continue
+        seen.add(low)
+        out.append(t)
+        if len(out) >= max_items:
+            break
+    return out
 
 
 # ── CLI-хелперы ──────────────────────────────────────────────────────────────

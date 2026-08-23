@@ -6,6 +6,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.17.0] - 2026-08-23
+### Added
+- Tray menu gains "Run now" (safe root.after hop from pystray thread).
+- CI lint job - ruff (E9,F63,F7,F82,F401) on windows/ubuntu; caught an
+  orphaned fragment that would crash "Check now".
+- Issue template and SECURITY.md; dependabot manages GitHub Actions
+  versions (checkout v7, setup-python v7, action-gh-release v3).
+
+## [3.16.0] - 2026-08-23
+### Added
+- **macOS sidebar chat switching via Accessibility API**
+  (experimental): AXUIElement tree walk by PID, chats filtered by the
+  pure `mac_pick_chat_titles()` helper, switching via kAXPressAction,
+  element re-resolved by name before each press. Graceful fallback to
+  current-view mode without pyobjc. Requires accessibility permission.
+- claude profile chrome gained 'new chat'; +3 unit tests over the
+  picker.
+
 ## [3.15.0] - 2026-08-23
 ### Added
 - **Update checker** - on launch (GUI log / headless stdout) silently

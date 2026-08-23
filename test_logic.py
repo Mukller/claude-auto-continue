@@ -234,7 +234,7 @@ def test_cli_profile_choices_and_list():
 def test_version_constant():
     import re as _re
     assert _re.match(r'3\.', app.__version__)
-    assert app.__version__ == '3.15.0'
+    assert app.__version__ == '3.17.0'
 
 
 def test_headless_log_file_rotation(tmp_path):

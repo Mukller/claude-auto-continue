@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-__version__ = '3.15.0'
-"""Claude Code Auto-Continue — v3.15.0
+__version__ = '3.17.0'
+"""Claude Code Auto-Continue — v3.17.0
 Windows: автопоиск кнопки через UI Automation + переключение чатов в сайдбаре.
 macOS:   поиск окна через pgrep/osascript, поиск кнопки по скриншоту-шаблону.
 """

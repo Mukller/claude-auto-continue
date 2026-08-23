@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-__version__ = '3.13.1'
-"""Claude Code Auto-Continue — v3.14.0
+__version__ = '3.15.0'
+"""Claude Code Auto-Continue — v3.15.0
 Windows: автопоиск кнопки через UI Automation + переключение чатов в сайдбаре.
 macOS:   поиск окна через pgrep/osascript, поиск кнопки по скриншоту-шаблону.
 """
@@ -121,6 +121,7 @@ I18N = {
         'find_btn': '↻  Найти',
         'profile_label': 'Приложение: {label}',
         'log_profile_switched': 'Профиль: {from} → {to} — рескан окна',
+        'log_update_new': '🚀 Доступна новая версия: {tag} — github.com/Mukller/claude-auto-continue/releases',
         'app_not_found': '⚠ Claude Desktop не найден. Открой приложение и нажми «Найти».',
         'app_found_chats': '✓ {title}  —  чатов в сайдбаре: {n}',
         'app_found_no_sidebar': '✓ {title}  —  сайдбар не обнаружен, работаем с текущим видом',
@@ -244,6 +245,7 @@ I18N = {
         'find_btn': '↻  Find',
         'profile_label': 'App: {label}',
         'log_profile_switched': 'Profile: {from} → {to} - rescan window',
+        'log_update_new': '🚀 New release available: {tag} - github.com/Mukller/claude-auto-continue/releases',
         'app_not_found': '⚠ Claude Desktop not found. Open the app and click "Find".',
         'app_found_chats': '✓ {title}  —  chats in sidebar: {n}',
         'app_found_no_sidebar': '✓ {title}  —  sidebar not detected, using current view',
@@ -360,6 +362,38 @@ _PROFILE_OVERRIDES = {}
 def _profile():
     """Активный профиль + пользовательские overrides из настроек."""
     return _resolve_profile(_CURRENT_PROFILE['name'], _PROFILE_OVERRIDES)
+
+
+def _parse_tag(tag: str):
+    """'v3.14.0' -> (3, 14, 0); мусор -> None."""
+    m = re.match(r'[vV]?(\d+)\.(\d+)\.(\d+)', (tag or '').strip())
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def fetch_latest_release(timeout: float = 5.0):
+    """Тег последнего релиза через GitHub API или None (тихо при офлайне)."""
+    import json as _json
+    import urllib.request as _ur
+    try:
+        req = _ur.Request(
+            'https://api.github.com/repos/'
+            'Mukller/claude-auto-continue/releases/latest',
+            headers={'Accept': 'application/vnd.github+json',
+                     'User-Agent': 'claude-auto-continue'})
+        with _ur.urlopen(req, timeout=timeout) as r:
+            tag = _json.load(r).get('tag_name')
+        return (_parse_tag(tag) and tag) or None
+    except Exception:
+        return None
+
+
+def check_update(current: str = __version__, timeout: float = 5.0):
+    """Тег нового релиза, если он строго новее текущей версии; иначе None."""
+    latest = fetch_latest_release(timeout)
+    if not latest:
+        return None
+    cur = _parse_tag(current)
+    return latest if cur and _parse_tag(latest) > cur else None
 
 
 def _acquire_single_instance() -> bool:
@@ -1614,6 +1648,7 @@ class App:
         # до входа в mainloop (RuntimeError на некоторых машинах).
         self.root.after(400, self._scan_now)
         self._try_restore_pending()
+        threading.Thread(target=self._check_updates_bg, daemon=True).start()
         root.protocol('WM_DELETE_WINDOW', self._on_close)
 
     def t(self, key, **kw):
@@ -2620,6 +2655,11 @@ class App:
         self._update_scan(self._last_windows, [])
         self._scan_now()
 
+    def _check_updates_bg(self):
+        tag = check_update()
+        if tag:
+            self._slog(self.t('log_update_new', tag=tag), 'accent')
+
     def _scan_now(self):
         def run():
             windows = find_claude_windows(self._slog)
@@ -3469,6 +3509,10 @@ def run_headless(args) -> int:
     log = _headless_logger(args.log_file)
     prof = _profile()
     log(f"Профиль приложения: {prof['label']}")
+    new_tag = check_update()
+    if new_tag:
+        log(f'Доступна новая версия: {new_tag} - '
+            'github.com/Mukller/claude-auto-continue/releases')
 
     try:
         n_chats = max(1, int(str(args.chats).strip()))
@@ -3570,10 +3614,18 @@ def main(argv=None):
             return
         sys.exit(run_headless(args))
     if IS_WIN:
+        # PerMonitorV2: физические пиксели на каждом мониторе - координаты
+        # UIA/кликов не плывут на смешанных конфигурациях. Фолбэк на
+        # system-DPI для Windows < 1703.
         try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            if not ctypes.windll.user32.SetProcessDpiAwarenessContext(
+                    ctypes.c_void_p(-4)):
+                ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except Exception:
-            pass
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            except Exception:
+                pass
     if not _acquire_single_instance():
         _fatal('Claude Auto-Continue уже запущен (проверьте трей).')
     root = tk.Tk()

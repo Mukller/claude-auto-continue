@@ -2934,8 +2934,9 @@ class App:
             self.root.after(0, lambda: self._lt_set_result(txt, ACC))
             self.root.after(0, self._lt_update_history_display)
             self.root.after(0, self._lt_add_to_plan)
-            # Уведомление
-            if HAS_NOTIF and self._sgv('v_notif', True):
+            # Уведомление. _lt_scan_impl работает в фоне: читаем cfg-словарь,
+            # а не tk-переменную v_notif (tkinter не потокобезопасен).
+            if HAS_NOTIF and self._cfg.get('notif', True):
                 try:
                     title = self.t('limit_tracker_notif_title', time=time_str)
                     msg = self.t('limit_tracker_found_in', chat=chat_name[:40])

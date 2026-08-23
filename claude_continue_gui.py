@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code Auto-Continue — v3.9
+"""Claude Code Auto-Continue — v3.11
 Windows: автопоиск кнопки через UI Automation + переключение чатов в сайдбаре.
 macOS:   поиск окна через pgrep/osascript, поиск кнопки по скриншоту-шаблону.
 """
@@ -1890,32 +1890,14 @@ class App:
     # ── UI ──────────────────────────────────────────────────────────────────
 
     def _build(self):
-        # ── Фиксированная шапка ─────────────────────────────────────────────
+        # ── Шапка: только компактные кнопки (тема / автозапуск / язык) ──────
+        # Чекбоксы трея и уведомлений переехали в тело страницы: при ширине
+        # окна 480px они наезжали на кнопки справа.
         langbar = tk.Frame(self.root, bg=BG, pady=5)
         langbar.pack(fill='x', side='top')
 
-        # ── Левая часть: чекбоксы трей / уведомления ─────────────────────
-        langleft = tk.Frame(langbar, bg=BG)
-        langleft.pack(side='left', padx=14)
-        self._tray_minimize.set(self._cfg_tray_minimize)
-        if HAS_TRAY:
-            tk.Checkbutton(langleft, text=self.t('tray_minimize'),
-                           variable=self._tray_minimize,
-                           bg=BG, fg=DIM, selectcolor=C2, activebackground=BG,
-                           activeforeground=TXT, font=('Segoe UI', 8),
-                           cursor='hand2').pack(anchor='w')
-        self.v_notif = tk.BooleanVar(value=self._cfg.get('notif', True))
-        if HAS_NOTIF:
-            self.chk_notif = tk.Checkbutton(langleft,
-                           text=self.t('notif_label'),
-                           variable=self.v_notif,
-                           bg=BG, fg=DIM, selectcolor=C2, activebackground=BG,
-                           activeforeground=TXT, font=('Segoe UI', 8),
-                           cursor='hand2')
-            self.chk_notif.pack(anchor='w')
-
         langwrap = tk.Frame(langbar, bg=BG)
-        langwrap.pack(side='right', padx=18)
+        langwrap.pack(side='right', padx=14)
         # Кнопки: тема / автозапуск / RU / EN
         next_theme = 'light' if self._theme == 'dark' else 'dark'
         self.btn_theme = FlatBtn(langwrap,
@@ -1990,19 +1972,6 @@ class App:
         self._log_body.pack_forget()
         self._log_arrow.config(text='▸')
 
-        # ── Фиксированный кольцевой таймер (не прокручивается) ─────────────
-        ring_outer = tk.Frame(self.root, bg=BG)
-        ring_outer.pack(fill='x', side='top', pady=(10, 6))
-        ring_wrap = tk.Frame(ring_outer, bg=BG)
-        ring_wrap.pack()
-        self.ring = RingTimer(ring_wrap)
-        self.ring.pack()
-        self.ring.draw(0, '--:--:--', self.t('ring_idle'), DIM)
-        self.lbl_hint = tk.Label(ring_wrap, text='', bg=BG, fg=DIM,
-                                 font=('Segoe UI', 9))
-        self.lbl_hint.pack(pady=(2, 0))
-        tk.Frame(self.root, bg=BRD, height=1).pack(fill='x', side='top')
-
         # ── Прокручиваемая средняя часть ────────────────────────────────────
         scroll_outer = tk.Frame(self.root, bg=BG)
         scroll_outer.pack(fill='both', expand=True, side='top')
@@ -2024,6 +1993,19 @@ class App:
             self._body_win, width=e.width))
 
         self.root.bind_all('<MouseWheel>', self._dispatch_scroll)
+
+        # ── Кольцевой таймер внутри прокрутки ────────────────────────────────
+        # Уезжает вместе со страницей, как раньше: в узком окне фиксированное
+        # кольцо съедало половину высоты и оставляло карточкам крошечный остаток.
+        ring_wrap = tk.Frame(body, bg=BG)
+        ring_wrap.pack(pady=(14, 4))
+        self.ring = RingTimer(ring_wrap)
+        self.ring.pack()
+        self.ring.draw(0, '--:--:--', self.t('ring_idle'), DIM)
+        self.lbl_hint = tk.Label(ring_wrap, text='', bg=BG, fg=DIM,
+                                 font=('Segoe UI', 9))
+        self.lbl_hint.pack(pady=(2, 0))
+        tk.Frame(body, bg=BRD, height=1).pack(fill='x', pady=(10, 0))
 
         # ── Предупреждение о зависимостях ───────────────────────────────────
         self.warn_frame = None
@@ -2080,6 +2062,26 @@ class App:
         self.lbl_sec = tk.Label(opts, text=self.t('sec'), bg=BG, fg=DIM, font=('Segoe UI', 9))
         self.lbl_sec.pack(side='left')
 
+        # ── Поведение приложения: трей и уведомления ────────────────────────
+        beh = tk.Frame(body, bg=BG)
+        beh.pack(fill='x', pady=(6, 0))
+        self.v_notif = tk.BooleanVar(value=self._cfg.get('notif', True))
+        self._tray_minimize.set(self._cfg_tray_minimize)
+        if HAS_TRAY:
+            tk.Checkbutton(beh, text=self.t('tray_minimize'),
+                           variable=self._tray_minimize,
+                           bg=BG, fg=DIM, selectcolor=C2, activebackground=BG,
+                           activeforeground=TXT, font=('Segoe UI', 8),
+                           cursor='hand2').pack(side='left')
+        if HAS_NOTIF:
+            self.chk_notif = tk.Checkbutton(beh,
+                           text=self.t('notif_label'),
+                           variable=self.v_notif,
+                           bg=BG, fg=DIM, selectcolor=C2, activebackground=BG,
+                           activeforeground=TXT, font=('Segoe UI', 8),
+                           cursor='hand2')
+            self.chk_notif.pack(side='left', padx=(12, 0))
+
         # ── Карточка: план запусков ──────────────────────────────────────────
         tk.Frame(body, bg=BG, height=10).pack()
         self._pc = RoundedCard(body, radius=12, fill=C1, outline=BRD,
@@ -2114,7 +2116,7 @@ class App:
 
         self.lbl_plan_status = tk.Label(self._pc.inner, text=self.t('plan_status_idle'),
                                         bg=C1, fg=DIM, font=('Segoe UI', 8),
-                                        justify='left', anchor='w')
+                                        justify='left', anchor='w', wraplength=380)
         self.lbl_plan_status.pack(fill='x', pady=(6, 4))
 
         self.btn_plan_start = FlatBtn(self._pc.inner, self.t('plan_start_btn'), self._toggle_plan,
@@ -2139,7 +2141,8 @@ class App:
         self.btn_find.pack(side='right')
 
         self.lbl_app_status = tk.Label(wc, text='…', bg=C1, fg=DIM,
-                                       font=('Segoe UI', 8), justify='left', anchor='w')
+                                       font=('Segoe UI', 8), justify='left',
+                                       anchor='w', wraplength=380)
         self.lbl_app_status.pack(fill='x', pady=(8, 0))
 
         nr = tk.Frame(wc, bg=C1)
@@ -2309,7 +2312,8 @@ class App:
                                   font=('Segoe UI', 8), padx=10, pady=5)
         self.btn_lt_add.pack(side='left', padx=(6, 0))
         self.lbl_lt_result = tk.Label(lt, text='', bg=C1, fg=ACC,
-                                      font=('Segoe UI', 9), anchor='w')
+                                      font=('Segoe UI', 9), anchor='w',
+                                      wraplength=380)
         self.lbl_lt_result.pack(fill='x', pady=(6, 0))
         self.v_lt_auto = tk.BooleanVar(value=self._cfg.get('lt_auto', False))
         self.chk_lt_auto = tk.Checkbutton(lt, text=self.t('limit_tracker_auto'),
@@ -2319,7 +2323,8 @@ class App:
                                           command=self._lt_toggle_auto, cursor='hand2')
         self.chk_lt_auto.pack(anchor='w', pady=(8, 0))
         self.lbl_lt_status = tk.Label(lt, text='', bg=C1, fg=DIM,
-                                      font=('Segoe UI', 8), anchor='w')
+                                      font=('Segoe UI', 8), anchor='w',
+                                      wraplength=380)
         self.lbl_lt_status.pack(fill='x', pady=(2, 0))
 
         # Интервал сканирования (15, 30, 45, 60 минут)
@@ -2525,7 +2530,8 @@ class App:
             # Клик по тексту тоже переключает галочку
             lbl.bind('<Button-1>', lambda _e, v=chk_var, t=_toggle: (v.set(not v.get()), t()))
         self._update_selected_label()
-        row_h = 22
+        # Фактическая высота чекбокса ~26px: при 22 последняя строка обрезалась
+        row_h = 26
         new_h = min(len(chats) * row_h + 4, 5 * row_h + 4)
         self._chat_canvas.configure(height=new_h)
         self._chat_canvas.yview_moveto(0)
@@ -2978,12 +2984,16 @@ class App:
             tk.Label(self.plan_list_frame, text=self.t('plan_empty'),
                      bg=C1, fg=DIM, font=('Segoe UI', 8)).pack(anchor='w')
             return
-        chips_row = tk.Frame(self.plan_list_frame, bg=C1)
-        chips_row.pack(anchor='w', fill='x')
-        for hm in self._plan:
+        # Сетка 4 в ряд: длинный план раньше уходил чипами за правый край
+        chips_grid = tk.Frame(self.plan_list_frame, bg=C1)
+        chips_grid.pack(anchor='w')
+        for idx, hm in enumerate(self._plan):
             h, m = hm
-            outer = tk.Frame(chips_row, bg=BRD, padx=1, pady=1)
-            outer.pack(side='left', padx=(0, 6), pady=2)
+            cell = tk.Frame(chips_grid, bg=C1)
+            cell.grid(row=idx // 4, column=idx % 4, sticky='w',
+                      padx=(0, 6), pady=2)
+            outer = tk.Frame(cell, bg=BRD, padx=1, pady=1)
+            outer.pack()
             chip = tk.Frame(outer, bg=C2, padx=8, pady=3)
             chip.pack()
             tk.Label(chip, text=f'{h:02d}:{m:02d}', bg=C2, fg=TXT,

@@ -6,6 +6,36 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-08-23
+### Changed
+- **Ring timer scrolls with the page again** — the countdown ring is back inside the
+  scrollable body instead of being pinned between the header and the cards; in short
+  windows the fixed ring was eating half the height and squeezing everything else.
+- Top bar slimmed to compact buttons only (theme / autostart / RU/EN). The
+  "minimize to tray" and "notifications" checkboxes moved into the page next to the
+  watch-mode options — at 480 px width they were colliding with the header buttons.
+### Fixed
+- Plan time chips now wrap in a 4-per-row grid instead of overflowing past the
+  card and window edge on long plans.
+- Chat list canvas height matches real row height (~26 px) — the last row was clipped.
+- Long status lines (window found, limit-tracker result/status, plan status) wrap
+  via `wraplength` instead of clipping at the card edge.
+
+## [3.10.0] - 2026-08-23
+### Added
+- **Safe Enter** — before pressing Enter the message input is read via UIA ValuePattern;
+  if it already contains typed text, Enter is skipped with a warning instead of sending
+  whatever was typed by hand. Removes the top known limitation.
+- **17 unit tests + CI** — extracted pure `parse_limit_text()` out of the UIA engine;
+  pytest suite covers AM/PM edge cases, EN/RU phrasings, duration roll-over past midnight,
+  false-positive guard, sidebar filter, i18n/theme table parity and plan target math.
+  GitHub Actions runs it on windows-latest + ubuntu-latest (guarded imports mean no heavy
+  deps needed). Tests immediately caught a real gap: `try again at HH:MM` wasn't matched.
+### Fixed
+- settings.json written atomically (`tmp` + `os.replace`) — a crash mid-write could
+  corrupt the config and break startup.
+- Log widget capped at ~500 lines — multi-day watch mode no longer grows memory unbounded.
+
 ## [3.9.0] - 2026-08-23
 ### Fixed
 - **FAILSAFE re-enabled** — `pyautogui.FAILSAFE = False` was removed. A stuck cycle

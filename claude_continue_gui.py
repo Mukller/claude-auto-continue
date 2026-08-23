@@ -3619,10 +3619,6 @@ def run_headless(args) -> int:
         log('--confidence: ожидается значение от 0.5 до 0.99', 'error')
         return 2
 
-    if not _acquire_single_instance():
-        log('Claude Auto-Continue уже запущен - второй экземпляр закрыт',
-            'error')
-        return 3
     if IS_WIN and not HAS_UIA:
         log('uiautomation не установлен: pip install uiautomation', 'error')
         return 2

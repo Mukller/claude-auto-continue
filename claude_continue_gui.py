@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-__version__ = '3.17.0'
-"""Claude Code Auto-Continue — v3.17.0
+__version__ = '3.17.1'
+"""Claude Code Auto-Continue — v3.17.1
 Windows: автопоиск кнопки через UI Automation + переключение чатов в сайдбаре.
 macOS:   поиск окна через pgrep/osascript, поиск кнопки по скриншоту-шаблону.
 """
@@ -3586,9 +3586,6 @@ def _headless_logger(log_file=None, max_file_lines=4000):
 
 def run_headless(args) -> int:
     """CLI-движок поверх того же run_cycle, что и GUI (#17)."""
-    if not _acquire_single_instance():
-        print('[!] Claude Auto-Continue already running', flush=True)
-        return 3
     if args.profile:
         _CURRENT_PROFILE['name'] = args.profile
     try:
@@ -3618,6 +3615,10 @@ def run_headless(args) -> int:
     if not (0.5 <= float(args.confidence) <= 0.99):
         log('--confidence: ожидается значение от 0.5 до 0.99', 'error')
         return 2
+    if not _acquire_single_instance():
+        log('Claude Auto-Continue уже запущен - второй экземпляр закрыт',
+            'error')
+        return 3
 
     if IS_WIN and not HAS_UIA:
         log('uiautomation не установлен: pip install uiautomation', 'error')

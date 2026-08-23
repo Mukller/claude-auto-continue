@@ -331,3 +331,86 @@ def test_mac_pick_chat_titles_max_and_order():
 
 def test_mac_empty_tree():
     assert app.mac_pick_chat_titles([]) == []
+
+
+
+# --- _profile_matches_window ---
+
+PROF = {
+    'process': ['claude.exe'],
+    'exclude_process_substrings': ['claude-code'],
+    'window_title_hint': None,
+}
+
+
+def test_pmw_exact_match():
+    assert app._profile_matches_window(
+        PROF, r'C:\Users\x\AppData\Claude.exe', 'Claude') is True
+
+
+def test_pmw_forward_slashes():
+    # Windows иногда возвращает пути с /
+    assert app._profile_matches_window(
+        PROF, 'C:/Users/x/AppData/Claude.exe', 'Claude') is True
+
+
+def test_pmw_wrong_process():
+    assert app._profile_matches_window(
+        PROF, r'C:\Windows\notepad.exe', 'Notepad') is False
+
+
+def test_pmw_exclude_substring():
+    p = dict(PROF, exclude_process_substrings=['claude-code'])
+    assert app._profile_matches_window(
+        p, r'C:\tools\claude-code\claude.exe', 'x') is False
+
+
+def test_pmw_empty_path():
+    assert app._profile_matches_window(PROF, '', 'Claude') is False
+
+
+def test_pmw_title_hint():
+    p = {'process': ['code.exe'], 'exclude_process_substrings': [],
+         'window_title_hint': 'Visual Studio Code'}
+    assert app._profile_matches_window(
+        p, r'C:\bin\code.exe', 'settings - Visual Studio Code') is True
+    assert app._profile_matches_window(
+        p, r'C:\bin\code.exe', 'Some Other App') is False
+
+
+# --- _parse_tag ---
+
+def test_parse_tag_valid():
+    assert app._parse_tag('v3.14.0') == (3, 14, 0)
+    assert app._parse_tag('3.14.0') == (3, 14, 0)
+    assert app._parse_tag('v10.20.30') == (10, 20, 30)
+
+
+def test_parse_tag_invalid():
+    assert app._parse_tag('garbage') is None
+    assert app._parse_tag('') is None
+    assert app._parse_tag(None) is None
+    assert app._parse_tag('v3') is None
+
+
+# --- цветовые хелперы ---
+
+def test_hex_rgb_roundtrip():
+    h = '#58a6ff'
+    rgb = app._hex_to_rgb(h)
+    assert len(rgb) == 3
+    assert app._rgb_to_hex(rgb).lower() == h.lower()
+
+
+def test_darken_reduces():
+    orig = app._hex_to_rgb('#ffffff')
+    dark = app._hex_to_rgb(app._darken('#ffffff'))
+    assert all(d < o for d, o in zip(dark, orig))
+
+
+def test_lerp_color_endpoints():
+    a, b = '#000000', '#ffffff'
+    assert app._lerp_color(a, b, 0.0) == a
+    assert app._lerp_color(a, b, 1.0) == b
+    mid = app._lerp_color(a, b, 0.5)
+    assert mid != a and mid != b

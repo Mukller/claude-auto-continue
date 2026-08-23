@@ -90,7 +90,11 @@ python claude_continue_gui.py
 
 - If the Claude window is covered by another window and `bring_to_foreground` fails, a click can land in the wrong place. The app logs a warning in that case.
 - The fallback template search is sensitive to UI scale/theme — recapture the template after a theme or DPI change.
-- `Continue` presses Enter "blindly" — if the chat's input box already has manually typed text, that will be sent.
+- `Continue`: before pressing Enter the input box is read via UIA — if it already contains typed text, Enter is skipped (a warning is logged). If the input can't be found, Enter is pressed "blindly".
+
+## Emergency stop
+
+Flinging the mouse into a **screen corner** (FAILSAFE) instantly aborts a running cycle — clicks stop and an emergency-stop entry appears in the log.
 
 ## Requirements
 

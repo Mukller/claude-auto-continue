@@ -756,6 +756,7 @@ _LIMIT_ABS = [
     re.compile(r'reset[s]?\s+at\s+(\d{1,2}):(\d{2})\s*([APap][Mm])?', re.I),
     re.compile(r'available\s+(?:again\s+)?at\s+(\d{1,2}):(\d{2})\s*([APap][Mm])?', re.I),
     re.compile(r'try\s+again\s+after\s+(\d{1,2}):(\d{2})\s*([APap][Mm])?', re.I),
+    re.compile(r'try\s+again\s+at\s+(\d{1,2}):(\d{2})\s*([APap][Mm])?', re.I),
     # Russian: "сбросится в 15:30"
     re.compile(r'сбросится\s+в\s+(\d{1,2}):(\d{2})', re.I),
     re.compile(r'обновится\s+в\s+(\d{1,2}):(\d{2})', re.I),
@@ -843,17 +844,13 @@ def find_limit_in_all_chats(window, log_fn, max_chats=30) -> tuple:
         click_rect(first_rect, log_fn)
 
 
-def find_rate_limit_reset(window_ctrl, log_fn) -> tuple:
-    """Вернуть (hour, minute) времени сброса лимита или None.
-    Ищет: абсолютное время ('resets at HH:MM') или
-    длительность ('in X hours Y minutes') и считает от now."""
-    if not HAS_UIA or window_ctrl is None:
-        return None
-    text = _collect_window_text(window_ctrl)
+def parse_limit_text(text: str, now=None):
+    """Чистая функция (без UIA): текст окна → (hour, minute) сброса или None.
+    Сначала абсолютное время ('resets at HH:MM'), потом длительность
+    ('in X hours Y minutes') от переданного/текущего момента."""
     if not text:
         return None
 
-    # Сначала ищем абсолютное время
     for pat in _LIMIT_ABS:
         m = pat.search(text)
         if m:
@@ -864,10 +861,8 @@ def find_rate_limit_reset(window_ctrl, log_fn) -> tuple:
             elif ampm == 'AM' and h == 12:
                 h = 0
             if 0 <= h <= 23 and 0 <= mn <= 59:
-                log_fn(f'  Трекер: найдено абс. время сброса {h:02d}:{mn:02d}', 'dim')
                 return (h, mn)
 
-    # Потом ищем длительность (in X hours Y minutes)
     for pat in _LIMIT_DUR:
         m = pat.search(text)
         if m:
@@ -882,10 +877,52 @@ def find_rate_limit_reset(window_ctrl, log_fn) -> tuple:
                          else datetime.timedelta(minutes=groups[0]))
             else:
                 continue
-            reset_dt = datetime.datetime.now() + delta
-            log_fn(f'  Трекер: через {delta}, сброс в {reset_dt.strftime("%H:%M")}', 'dim')
+            reset_dt = (now or datetime.datetime.now()) + delta
             return (reset_dt.hour, reset_dt.minute)
 
+    return None
+
+
+def find_rate_limit_reset(window_ctrl, log_fn) -> tuple:
+    """Вернуть (hour, minute) времени сброса лимита или None."""
+    if not HAS_UIA or window_ctrl is None:
+        return None
+    text = _collect_window_text(window_ctrl)
+    result = parse_limit_text(text)
+    if not result:
+        return None
+    h, mn = result
+    log_fn(f'  Трекер: сброс лимита в {h:02d}:{mn:02d}', 'dim')
+    return result
+
+
+def read_edit_value(window_ctrl, rect, max_nodes=1500, time_budget=1.5):
+    """Текст поля ввода внутри области rect (через UIA ValuePattern).
+    None — если прочитать не удалось (тогда Enter жмётся как раньше)."""
+    if not HAS_UIA or window_ctrl is None or rect is None:
+        return None
+    start = time.time()
+    stack = [window_ctrl]
+    visited = 0
+    while stack and visited < max_nodes:
+        if time.time() - start > time_budget:
+            return None
+        ctrl = stack.pop()
+        visited += 1
+        try:
+            r = ctrl.BoundingRectangle
+            if (r and ctrl.ControlTypeName == 'EditControl'
+                    and r.left >= rect.left - 4 and r.right <= rect.right + 4
+                    and r.top >= rect.top - 4 and r.bottom <= rect.bottom + 4):
+                return ctrl.GetValuePattern().Value
+            child = ctrl.GetFirstChildControl()
+            kids = []
+            while child:
+                kids.append(child)
+                child = child.GetNextSiblingControl()
+            stack.extend(kids)
+        except Exception:
+            continue
     return None
 
 
@@ -935,15 +972,22 @@ def run_cycle(n_or_indices, search_try_again: bool, auto_continue: bool, confide
         if auto_continue and pyautogui is not None:
             if did_something:
                 time.sleep(0.4)  # дать кнопке отработать перед Enter
+            skip_enter = False
             input_rect = find_message_input(window['ctrl'], log_fn)
             if input_rect:
                 click_rect(input_rect, log_fn, press_enter_after=False)
                 time.sleep(0.2)
+                typed = read_edit_value(window['ctrl'], input_rect)
+                if typed and typed.strip():
+                    # Раньше Enter жался «вслепую» и уходил набранный текст.
+                    log_fn(f'  ⚠ В поле ввода уже есть текст ({len(typed)} симв.) — Enter НЕ нажат', 'warn')
+                    skip_enter = True
             else:
                 log_fn('  ⚠ Поле ввода не найдено, жму Enter вслепую', 'warn')
-            pyautogui.press('enter')
-            log_fn('  → Enter отправлен (продолжить)', 'success')
-            did_something = True
+            if not skip_enter:
+                pyautogui.press('enter')
+                log_fn('  → Enter отправлен (продолжить)', 'success')
+                did_something = True
 
         if did_something:
             ok += 1
@@ -1584,8 +1628,12 @@ class App:
             'lt_interval': self._sg('sp_lt_interval', 30),
         }
         try:
-            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            # Атомарная запись: обрыв питания/крэш посреди прямой записи
+            # портил settings.json и валил старт приложения.
+            tmp = SETTINGS_FILE + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(d, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, SETTINGS_FILE)
         except Exception:
             pass
 
@@ -2550,6 +2598,11 @@ class App:
         ts = datetime.datetime.now().strftime('%H:%M:%S')
         self.log.config(state='normal')
         self.log.insert('end', f'[{ts}]  {msg}\n', tag)
+        # Режим наблюдения может работать сутками — ограничиваем журнал,
+        # иначе виджет Text растёт в памяти бесконечно.
+        lines = int(self.log.index('end-1c').split('.')[0])
+        if lines > 600:
+            self.log.delete('1.0', f'{lines - 500}.0')
         self.log.see('end')
         self.log.config(state='disabled')
         if self._log_collapsed:

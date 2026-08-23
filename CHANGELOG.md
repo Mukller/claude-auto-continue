@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.15.0] - 2026-08-23
+### Added
+- **Update checker** - on launch (GUI log / headless stdout) silently
+  queries GitHub releases once and reports a strictly newer tag;
+  offline-safe, no tracking.
+- **PerMonitorV2 DPI awareness** - physical pixel coordinates on every
+  monitor; clicks no longer drift on mixed-DPI multi-monitor setups.
+  Falls back to system-DPI on Windows < 1703.
+### Fixed
+- `__version__` constant was left at 3.13.1 by the #36 squash merge
+  while docstring/CHANGELOG said 3.14.0.
+
 ## [3.14.0] - 2026-08-23
 ### Added
 - **Per-profile overrides via settings.json** - any profile field

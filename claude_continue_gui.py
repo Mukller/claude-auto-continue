@@ -25,7 +25,7 @@ try:
 except ImportError:
     _fatal("tkinter не найден. Переустановите Python с поддержкой Tkinter.")
 
-import threading, time, datetime, math, ctypes, json, re
+import threading, time, datetime, math, ctypes, json, re, tempfile
 from collections import deque
 from engine import (parse_limit_text, has_limit_context,
                     next_reset_occurrence, cli_target as _cli_target,
@@ -3447,9 +3447,6 @@ def _headless_logger(log_file=None, max_file_lines=4000):
 
 def run_headless(args) -> int:
     """CLI-движок поверх того же run_cycle, что и GUI (#17)."""
-    if not _acquire_single_instance():
-        print('[!] Claude Auto-Continue already running', flush=True)
-        return 3
     if args.profile:
         _CURRENT_PROFILE['name'] = args.profile
     log = _headless_logger(args.log_file)
@@ -3468,6 +3465,10 @@ def run_headless(args) -> int:
         log('--confidence: ожидается значение от 0.5 до 0.99', 'error')
         return 2
 
+    if not _acquire_single_instance():
+        log('Claude Auto-Continue уже запущен - второй экземпляр закрыт',
+            'error')
+        return 3
     if IS_WIN and not HAS_UIA:
         log('uiautomation не установлен: pip install uiautomation', 'error')
         return 2

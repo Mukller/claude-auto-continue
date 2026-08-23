@@ -26,9 +26,11 @@ jobs:
           pyinstaller --onefile --noconsole --name ClaudeAutoContinue
           --collect-all pystray --collect-all plyer claude_continue_gui.py
       - name: Smoke-test bundle (console build shares code/frozen env)
-        run: |
+        run: >
           python -m PyInstaller --onefile --console --name smoke_cli
-            --collect-all pystray --collect-all plyer claude_continue_gui.py
+          --collect-all pystray --collect-all plyer claude_continue_gui.py
+      - name: Smoke run
+        run: |
           & ".\dist\smoke_cli.exe" --version
           if ($LASTEXITCODE -ne 0) { throw "smoke failed" }
       - name: Upload to release

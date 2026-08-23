@@ -1699,11 +1699,12 @@ class App:
         self._plan = sorted(set(plan))
         self._history = [e for e in d.get('history', [])[-10:]
                          if isinstance(e, dict) and isinstance(e.get('ok'), int)]
-        # Восстановление выбора чатов (применится при первом скане)
-        try:
-            self._saved_sel = {int(i) for i in d.get('sel_chats', []) if int(i) >= 0}
-        except (TypeError, ValueError):
-            self._saved_sel = set()
+        # Восстановление выбора чатов: храним ИМЕНА, а не индексы —
+        # между сессиями Recents пересортировывается, и выбор по индексам
+        # молча указывал бы на другие чаты (ревью PR #20).
+        names = d.get('sel_chat_names', [])
+        self._saved_sel_names = ([str(x) for x in names[:60]]
+                                 if isinstance(names, list) else None)
         # tray_minimize доступна только после __init__ tk.BooleanVar; обновляем позже
         self._cfg_tray_minimize = d.get('tray_minimize', True)
 
@@ -1732,7 +1733,9 @@ class App:
             'pending_iso': pending,
             'lt_auto': self._sgv('v_lt_auto', False),
             'lt_interval': self._sg('sp_lt_interval', 30),
-            'sel_chats': sorted(self._selected_chat_idx),
+            'sel_chat_names': [self._chats_preview[i]['name']
+                               for i in sorted(self._selected_chat_idx)
+                               if self._chats_preview and 0 <= i < len(self._chats_preview)],
         }
         try:
             # Атомарная запись: обрыв питания/крэш посреди прямой записи
@@ -2467,8 +2470,8 @@ class App:
         self._lt_last_scan = None  # время последнего сканирования
         self._lt_last_chat = None  # имя чата где найден лимит
         self._lt_history = []  # история [time1, time2, time3, ...] последних 3 находок
-        self._lt_prev_time = None
-        self._lt_prev_dt = None  # «дубль» честен, только пока срок прошлого сброса не наступил  # предыдущее найденное время для проверки дублей
+        self._lt_prev_time = None  # предыдущее найденное время для проверки дублей
+        self._lt_prev_dt = None  # «дубль» честен, только пока срок прошлого сброса не наступил
         self._lt_next_scan_time = None  # время следующего сканирования
         self._lt_auto_stop_evt = threading.Event()
         self._lt_auto_stop_evt.set()  # изначально не сканируем
@@ -2599,9 +2602,11 @@ class App:
         self._chats_preview = chats
         # Восстановить сохранённый выбор один раз; иначе авто-select первых 3
         if chats and not self._selected_chat_idx:
-            if getattr(self, '_saved_sel', None):
-                self._selected_chat_idx = {i for i in self._saved_sel if i < len(chats)}
-                self._saved_sel = set()
+            saved = getattr(self, '_saved_sel_names', None)
+            if saved:
+                self._selected_chat_idx = {i for i, c in enumerate(chats)
+                                           if c['name'] in saved}
+                self._saved_sel_names = None
             else:
                 self._selected_chat_idx = set(range(min(3, len(chats))))
         if not windows:

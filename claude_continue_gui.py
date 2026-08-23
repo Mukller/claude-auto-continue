@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-__version__ = '3.17.1'
-"""Claude Code Auto-Continue — v3.17.1
+__version__ = '3.18.0'
+"""Claude Code Auto-Continue — v3.18.0
 Windows: автопоиск кнопки через UI Automation + переключение чатов в сайдбаре.
 macOS:   поиск окна через pgrep/osascript, поиск кнопки по скриншоту-шаблону.
 """
@@ -1732,6 +1732,11 @@ class App:
         self._load_settings()
         _CURRENT_PROFILE['name'] = getattr(self, '_cfg_profile',
                                            DEFAULT_PROFILE)
+        # Статистика между сессиями
+        stats = self._cfg.get('stats', {})
+        if isinstance(stats, dict):
+            self._stat_clicks = int(stats.get('clicks', 0))
+            self._stat_ok = int(stats.get('ok', 0))
         self._apply_theme_vars()
         self._check_deps()
         self._build()
@@ -1815,8 +1820,23 @@ class App:
         self._cfg = d
         lang = d.get('lang', 'ru')
         self.lang = lang if lang in I18N else 'ru'
-        theme = d.get('theme', 'dark')
-        self._theme = theme if theme in THEMES else 'dark'
+        theme = d.get('theme')
+        if theme and theme in THEMES:
+            self._theme = theme
+        elif IS_WIN and winreg is not None:
+            # Автоопределение темы Windows при первом запуске
+            try:
+                k = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    r'Software\Microsoft\Windows\CurrentVersion\Themes'
+                    r'\Personalize', 0, winreg.KEY_READ)
+                val, _ = winreg.QueryValueEx(k, 'AppsUseLightTheme')
+                winreg.CloseKey(k)
+                self._theme = 'light' if val == 1 else 'dark'
+            except Exception:
+                self._theme = 'dark'
+        else:
+            self._theme = 'dark'
         prof = str(d.get('profile', DEFAULT_PROFILE)).strip().lower()
         self._cfg_profile = prof if prof in APP_PROFILES else DEFAULT_PROFILE
         plan = []
@@ -1848,6 +1868,8 @@ class App:
             'profile': _CURRENT_PROFILE['name'],
             'profile_overrides': getattr(self, '_cfg_profile_overrides',
                                          {}),
+            'stats': {'clicks': self._stat_clicks,
+                      'ok': self._stat_ok},
             'theme': self._theme,
             'h': self._sg('sp_h', 5),
             'm': self._sg('sp_m', 0),
@@ -1988,6 +2010,48 @@ class App:
         self.root.after(0, self._quit_app)
 
     # ── Уведомления Windows ────────────────────────────────────────────────
+
+    def _play_success_sound(self):
+        """Системный звук при успешном цикле."""
+        try:
+            if IS_WIN:
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            elif IS_MAC:
+                os.system('afplay /System/Library/Sounds/Glass.aiff &')
+        except Exception:
+            pass
+
+    def _export_settings(self):
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(
+            defaultextension='.json',
+            filetypes=[('JSON', '*.json')],
+            initialfile='claude-auto-continue-settings.json')
+        if not path:
+            return
+        self._save_settings()
+        import shutil
+        shutil.copy2(SETTINGS_FILE, path)
+        self._log(self.t('log_export_ok', path=path), 'success')
+
+    def _import_settings(self):
+        from tkinter import filedialog, messagebox
+        path = filedialog.askopenfilename(filetypes=[('JSON', '*.json')])
+        if not path:
+            return
+        try:
+            json.load(open(path, encoding='utf-8'))
+        except Exception as e:
+            messagebox.showerror('Import', f'Invalid JSON: {e}')
+            return
+        if not messagebox.askyesno(
+                'Import', 'Replace current settings? App will restart.'):
+            return
+        import shutil
+        shutil.copy2(path, SETTINGS_FILE)
+        python = sys.executable
+        os.execl(python, python, os.path.abspath(__file__))
 
     def _notify(self, ok: int, enabled=None):
         # enabled читается в главном потоке ДО запуска воркера —
@@ -2411,6 +2475,16 @@ class App:
             bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
             font=('Segoe UI', 8), padx=10, pady=4)
         self.btn_profile.pack(side='left', padx=(0, 8))
+        self.btn_export = FlatBtn(
+            wh, text='⬆', cmd=self._export_settings,
+            bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+            font=('Segoe UI', 8), padx=8, pady=4)
+        self.btn_export.pack(side='right', padx=(4, 0))
+        self.btn_import = FlatBtn(
+            wh, text='⬇', cmd=self._import_settings,
+            bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+            font=('Segoe UI', 8), padx=8, pady=4)
+        self.btn_import.pack(side='right')
         tk.Label(wh, text='Claude Desktop', bg=C1, fg=DIM,
                  font=('Segoe UI', 9, 'bold')).pack(side='left')
         self.btn_find = FlatBtn(wh, self.t('find_btn'), self._scan_now,
@@ -3092,6 +3166,7 @@ class App:
         self._notify(ok, o.get('notify', False))
         if ok:
             self.root.after(0, lambda c=ok: self.ring.draw(100, '✓', self.t('ring_done', n=c), SUC))
+            self.root.after(0, self._play_success_sound)
             self._slog(self.t('log_success', n=ok), 'success')
         else:
             self.root.after(0, lambda: self.ring.draw(100, '✗', self.t('ring_fail'), ERR))
@@ -3586,6 +3661,9 @@ def _headless_logger(log_file=None, max_file_lines=4000):
 
 def run_headless(args) -> int:
     """CLI-движок поверх того же run_cycle, что и GUI (#17)."""
+    if not _acquire_single_instance():
+        print('[!] Claude Auto-Continue already running', flush=True)
+        return 3
     if args.profile:
         _CURRENT_PROFILE['name'] = args.profile
     try:
@@ -3615,11 +3693,11 @@ def run_headless(args) -> int:
     if not (0.5 <= float(args.confidence) <= 0.99):
         log('--confidence: ожидается значение от 0.5 до 0.99', 'error')
         return 2
+
     if not _acquire_single_instance():
         log('Claude Auto-Continue уже запущен - второй экземпляр закрыт',
             'error')
         return 3
-
     if IS_WIN and not HAS_UIA:
         log('uiautomation не установлен: pip install uiautomation', 'error')
         return 2

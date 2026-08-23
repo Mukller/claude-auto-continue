@@ -11,3 +11,8 @@ templates/
 # Локальное состояние приложения (время, план, история)
 settings.json
 settings.json.tmp
+
+# PyInstaller artifacts
+dist/
+build/
+*.spec

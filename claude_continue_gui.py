@@ -27,7 +27,8 @@ except ImportError:
 
 import threading, time, datetime, math, ctypes, json, re, tempfile
 from collections import deque
-from engine import (parse_limit_text, has_limit_context,
+from engine import (parse_limit_text,
+                    has_limit_context,  # noqa: F401  (re-export)
                     next_reset_occurrence, cli_target as _cli_target,
                     APP_PROFILES, DEFAULT_PROFILE, profile_names,
                     resolve_profile as _resolve_profile,
@@ -195,6 +196,7 @@ I18N = {
         'history_ok': '✓ {n} чат(ов)',
         'history_fail': '✗ не сделано',
         'tray_show': 'Открыть',
+        'tray_run_now': 'Запустить сейчас',
         'tray_quit': 'Выход',
         'tray_minimize': 'Свернуть в трей при закрытии',
         'notif_title': 'Claude Auto-Continue',
@@ -319,6 +321,7 @@ I18N = {
         'history_ok': '✓ {n} chat(s)',
         'history_fail': '✗ nothing done',
         'tray_show': 'Show',
+        'tray_run_now': 'Run now',
         'tray_quit': 'Exit',
         'tray_minimize': 'Minimize to tray on close',
         'notif_title': 'Claude Auto-Continue',
@@ -1952,11 +1955,20 @@ class App:
             return
         menu = pystray.Menu(
             pystray.MenuItem(self.t('tray_show'), self._show_from_tray, default=True),
+            pystray.MenuItem(self.t('tray_run_now'), lambda _i, _it: self._tray_run_now()),
             pystray.MenuItem(self.t('tray_quit'), lambda _icon, _item: self._schedule_quit()),
         )
         icon = pystray.Icon('claude-auto-continue', img, 'Claude Auto-Continue', menu)
         self._tray_icon = icon
         threading.Thread(target=icon.run, daemon=True).start()
+
+    def _tray_run_now(self):
+        """«Запустить сейчас» из трея - тот же _click_now в главном
+        потоке через root.after (pystray живёт в отдельном потоке)."""
+        try:
+            self.root.after(0, self._click_now)
+        except Exception:
+            pass
 
     def _show_from_tray(self, _icon=None, _item=None):
         self.root.after(0, self._restore_from_tray)
@@ -3144,14 +3156,6 @@ class App:
             if cont:
                 self._slog(self.t('log_cont_note'), 'dim')
         threading.Thread(target=run, daemon=True).start()
-
-        """Дубль (то же время подряд). Предупреждаем со второго раза,
-        глушим автоскан только после третьего: ежедневный лимит легитимно
-        сбрасывается в одно и то же время каждый день."""
-        if dup_count >= 3:
-            self.v_lt_auto.set(False)
-            self._lt_toggle_auto()
-        self._log(self.t('limit_tracker_duplicate'), 'warn')
 
     def _lt_scan(self):
         def run():

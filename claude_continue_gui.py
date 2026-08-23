@@ -2789,6 +2789,8 @@ class App:
                 return
             try:
                 self._lt_scan_impl()
+            except _FAILSAFE_EXC:
+                self._slog(self.t('log_failsafe'), 'warn')
             finally:
                 self._lt_scan_lock.release()
         threading.Thread(target=run, daemon=True).start()

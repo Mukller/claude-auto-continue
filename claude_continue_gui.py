@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Claude Code Auto-Continue — v3.13
+__version__ = '3.13.1'
+"""Claude Code Auto-Continue — v3.13.1
 Windows: автопоиск кнопки через UI Automation + переключение чатов в сайдбаре.
 macOS:   поиск окна через pgrep/osascript, поиск кнопки по скриншоту-шаблону.
 """
@@ -358,6 +359,31 @@ _CURRENT_PROFILE = {'name': DEFAULT_PROFILE}
 def _profile():
     """Активный профиль приложений (см. engine.APP_PROFILES)."""
     return _resolve_profile(_CURRENT_PROFILE['name'])
+
+
+def _acquire_single_instance() -> bool:
+    """True, если мы единственный запущенный экземпляр.
+
+    Вторая копия двигала бы мышь наперегонки с первой - внутренний
+    _cycle_lock их не разруливает (он процессный). Windows: именованный
+    mutex; macOS/Linux: flock на lockfile в системном temp."""
+    if IS_WIN:
+        global _si_mutex
+        _si_mutex = ctypes.windll.kernel32.CreateMutexW(
+            None, False, 'Local\\ClaudeAutoContinue')
+        # ERROR_ALREADY_EXISTS = 183
+        return bool(_si_mutex) and \
+            ctypes.windll.kernel32.GetLastError() != 183
+    try:
+        import fcntl
+        global _si_lock_fh
+        lock_path = os.path.join(tempfile.gettempdir(),
+                                 'claude-auto-continue.lock')
+        _si_lock_fh = open(lock_path, 'w')
+        fcntl.flock(_si_lock_fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except (ImportError, OSError):
+        return False
 
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -3348,6 +3374,8 @@ def _build_cli_parser():
                         % '|'.join(profile_names()))
     p.add_argument('--list-profiles', action='store_true',
                    help='показать доступные профили и выйти')
+    p.add_argument('--version', action='version',
+                   version=f'%(prog)s {__version__}')
     p.add_argument('--headless', action='store_true',
                    help='работать без окна: таймер/циклы в консоли')
     p.add_argument('--at', metavar='HH:MM', default=None,
@@ -3371,12 +3399,24 @@ def _build_cli_parser():
     return p
 
 
-def _headless_logger(log_file=None):
-    # Windows-консоль часто в cp1251: эмодзи из движка (⚠/✓) роняют print.
+def _headless_logger(log_file=None, max_file_lines=4000):
+    """Логгер CLI: stdout (+utf-8 для cp1251-консолей) и опциональный файл.
+
+    Файловый лог ротируется: при превышении max_file_lines остаются
+    последние max_file_lines // 2 строки - иначе ночные прогоны распухают
+    бесконечно (та же болезнь, что была у GUI-лога в #11)."""
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     except Exception:
         pass
+
+    state = {'n': 0}
+    if log_file:
+        try:
+            with open(log_file, encoding='utf-8', errors='replace') as f:
+                state['n'] = sum(1 for _ in f)
+        except OSError:
+            state['n'] = 0
 
     def log(msg, tag=''):
         line = f'[{datetime.datetime.now():%H:%M:%S}] {msg}'
@@ -3384,18 +3424,32 @@ def _headless_logger(log_file=None):
             print(line, flush=True)
         except UnicodeEncodeError:
             enc = sys.stdout.encoding or 'ascii'
-            print(line.encode(enc, errors='replace').decode(enc), flush=True)
-        if log_file:
-            try:
-                with open(log_file, 'a', encoding='utf-8') as f:
-                    f.write(line + '\n')
-            except Exception:
-                pass
+            print(line.encode(enc, errors='replace').decode(enc),
+                  flush=True)
+        if not log_file:
+            return
+        try:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(line + '\n')
+            state['n'] += 1
+            if state['n'] > max_file_lines:
+                keep = max(1, max_file_lines // 2)
+                with open(log_file, encoding='utf-8',
+                          errors='replace') as f:
+                    tail = f.readlines()[-keep:]
+                with open(log_file, 'w', encoding='utf-8') as f:
+                    f.writelines(tail)
+                state['n'] = len(tail)
+        except Exception:
+            pass
     return log
 
 
 def run_headless(args) -> int:
     """CLI-движок поверх того же run_cycle, что и GUI (#17)."""
+    if not _acquire_single_instance():
+        print('[!] Claude Auto-Continue already running', flush=True)
+        return 3
     if args.profile:
         _CURRENT_PROFILE['name'] = args.profile
     log = _headless_logger(args.log_file)
@@ -3473,7 +3527,7 @@ def run_headless(args) -> int:
 _CLI_FLAGS = ('--headless', '--now', '--at', '--chats', '--once',
               '--interval', '--no-try-again', '--no-continue',
               '--confidence', '--log-file', '--profile', '--list-profiles',
-              '-h', '--help')
+              '--version', '-h', '--help')
 
 
 def main(argv=None):
@@ -3494,6 +3548,8 @@ def main(argv=None):
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except Exception:
             pass
+    if not _acquire_single_instance():
+        _fatal('Claude Auto-Continue уже запущен (проверьте трей).')
     root = tk.Tk()
     # Масштаб от фактического DPI, а не хардкод: на 100%-мониторах при 1.35
     # всё разъезжается, на 200% - наоборот мелко.

@@ -227,3 +227,31 @@ def test_cli_profile_choices_and_list():
     import pytest as _pt
     with _pt.raises(SystemExit):
         _cli_args(['--headless', '--profile', 'nope'])
+
+
+# --- Quick wins: версия, ротация файлового лога ---
+
+def test_version_constant():
+    import re as _re
+    assert _re.match(r'3\.', app.__version__)
+    assert app.__version__ == '3.13.1'
+
+
+def test_headless_log_file_rotation(tmp_path):
+    lf = tmp_path / 'run.log'
+    log = app._headless_logger(str(lf), max_file_lines=100)
+    for i in range(120):
+        log('line %d' % i)
+    count = len(lf.read_text(encoding='utf-8').splitlines())
+    assert 0 < count <= 100, count
+
+
+def test_headless_logger_counts_existing_file(tmp_path):
+    lf = tmp_path / 'pre.log'
+    lf.write_text('\n'.join('x%d' % k for k in range(95)) + '\n',
+                   encoding='utf-8')
+    log = app._headless_logger(str(lf), max_file_lines=100)
+    for i in range(20):
+        log('new %d' % i)
+    count = len(lf.read_text(encoding='utf-8').splitlines())
+    assert count <= 100

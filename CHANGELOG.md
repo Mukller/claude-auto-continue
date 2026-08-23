@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.13.1] - 2026-08-23
+### Added
+- **Single-instance guard** - a second copy (autostart + manual launch) no
+  longer fights the first one for the mouse: named mutex on Windows, flock on
+  macOS/Linux. GUI shows an error box, headless exits with code 3.
+- \--version\ flag (headless and GUI builds).
+- Release workflow smoke-tests the built exe (\--version\ exit code) before
+  attaching it to the release.
+### Fixed
+- \--log-file\ now rotates (~4000 lines -> keeps last half); multi-day
+  headless runs no longer grow the log unbounded.
+
 ## [3.13.0] - 2026-08-23
 ### Added
 - **App profiles — pivot to universal Electron auto-continue.** The engine is

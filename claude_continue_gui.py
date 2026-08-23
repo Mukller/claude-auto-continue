@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code Auto-Continue — v3.11
+"""Claude Code Auto-Continue — v3.13
 Windows: автопоиск кнопки через UI Automation + переключение чатов в сайдбаре.
 macOS:   поиск окна через pgrep/osascript, поиск кнопки по скриншоту-шаблону.
 """

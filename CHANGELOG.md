@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-08-23
+### Added
+- **Per-profile overrides via settings.json** - any profile field
+  (\utton_labels\, \input_names\, \sidebar_chrome\, ...) can be tweaked
+  without touching code: \profile_overrides\ merges over the base profile
+  with a whitelist of existing keys, so typos cannot break the engine.
+  Headless mode reads the same file.
+### Fixed
+- Selected profile is now persisted on save - since #27 it was only read
+  from settings.json, so switching profiles did not survive restarts.
+
 ## [3.13.1] - 2026-08-23
 ### Added
 - **Single-instance guard** - a second copy (autostart + manual launch) no

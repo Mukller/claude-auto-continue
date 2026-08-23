@@ -234,7 +234,7 @@ def test_cli_profile_choices_and_list():
 def test_version_constant():
     import re as _re
     assert _re.match(r'3\.', app.__version__)
-    assert app.__version__ == '3.17.1'
+    assert app.__version__ == '3.18.0'
 
 
 def test_headless_log_file_rotation(tmp_path):
@@ -285,6 +285,7 @@ def test_profile_persists_via_settings(tmp_path, monkeypatch):
     fake._cfg = {}; fake._history = []
     fake._running = False; fake._target = None
     fake._plan = []
+    fake._stat_clicks = 0; fake._stat_ok = 0
     fake._tray_minimize = type('V', (), {'get': lambda s: True})()
     fake._selected_chat_idx = set()
     m._CURRENT_PROFILE['name'] = 'cursor'

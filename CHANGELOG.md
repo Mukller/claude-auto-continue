@@ -6,6 +6,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.18.0] - 2026-08-23
+### Added
+- **Session stats persist across restarts** - click/ok counters saved
+  to settings.json and restored on launch.
+- **Sound notification** - system beep after a successful cycle
+  (Windows MessageBeep / macOS Glass.aiff).
+- **Export/Import settings** - up/down arrows save and restore full
+  configuration as JSON; import offers app restart.
+- **Auto-detect Windows dark/light theme** - first launch reads
+  AppsUseLightTheme from registry instead of defaulting to dark.
+
+## [3.18.0] - 2026-08-23
+### Added
+- **Session stats persist across restarts** - click/ok counters are
+  saved to settings.json and restored on next launch.
+- **Sound notification** - system beep (Windows MessageBeep / macOS
+  Glass.aiff) after a successful cycle.
+- **Export/Import settings** - ⬆/⬇ buttons save and restore the full
+  configuration as a JSON file; import offers app restart.
+- **Auto-detect Windows dark/light theme** - first launch reads
+  AppsUseLightTheme from registry instead of defaulting to dark.
+
 ## [3.17.0] - 2026-08-23
 ### Added
 - Tray menu gains "Run now" (safe root.after hop from pystray thread).

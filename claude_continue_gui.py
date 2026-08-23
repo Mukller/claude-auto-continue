@@ -3536,6 +3536,14 @@ _CLI_FLAGS = ('--headless', '--now', '--at', '--chats', '--once',
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+    # В noconsole-сборке sys.stdout равен None: argparse при --version
+    # упал бы на печати. Перехватываем флаг до argparse, молча выходим.
+    if '--version' in argv:
+        try:
+            print('Claude Auto-Continue ' + __version__)
+        except Exception:
+            pass
+        return
     if any(a in argv or a.startswith('--at=')
            or a.startswith('--profile=') for a in _CLI_FLAGS):
         args = _build_cli_parser().parse_args(argv)

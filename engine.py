@@ -11,6 +11,93 @@ import re
 # ── Кнопка "Try again" (тексты для UIA/шаблонного поиска) ────────────────────
 TRY_AGAIN_LABELS = ['Try again', 'try again', 'Retry', 'Попробовать снова']
 
+# ── Профили приложений (универсальный auto-continue) ────────────────────────
+# Каждый профиль описывает, КАК находить окно приложения, кнопку повтора,
+# поле ввода и навигацию сайдбара. Claude Desktop - эталонный профиль;
+# остальные - экспериментальные (дерево UIA у них не сверялось поэлементно).
+DEFAULT_PROFILE = 'claude'
+
+APP_PROFILES = {
+    'claude': {
+        'label': 'Claude Desktop',
+        'process': ['claude.exe'],
+        'exclude_process_substrings': ['claude-code'],
+        'button_labels': ['Try again', 'try again', 'Retry',
+                          'Попробовать снова'],
+        'input_names': ['Prompt'],
+        'sidebar_chrome': {
+            'back', 'collapse sidebar', 'expand sidebar', 'forward', 'menu',
+            'search', 'sidebar', 'mode', 'chat', 'code', 'cowork',
+            'new session', 'routines', 'dispatch', 'dispatch beta', 'beta',
+            'customize', 'more navigation items', 'pinned', 'recents',
+            'filter', 'home', 'new',
+        },
+        'sidebar_prefixes': ('more options for ', 'show more', 'show less',
+                             'show all', 'relaunch to update'),
+        'window_title_hint': None,
+        'experimental': False,
+    },
+    'cursor': {
+        'label': 'Cursor',
+        'process': ['cursor.exe'],
+        'exclude_process_substrings': [],
+        'button_labels': ['Try again', 'try again', 'Retry', 'Resume',
+                          'Continue'],
+        'input_names': ['Prompt', 'Chat input', 'Ask anything'],
+        'sidebar_chrome': {
+            'back', 'forward', 'search', 'settings', 'history', 'chats',
+            'new chat', 'more options', 'pinned', 'recents', 'home',
+        },
+        'sidebar_prefixes': ('more options for ',),
+        'window_title_hint': None,
+        'experimental': True,
+    },
+    'windsurf': {
+        'label': 'Windsurf',
+        'process': ['windsurf.exe'],
+        'exclude_process_substrings': [],
+        'button_labels': ['Try again', 'try again', 'Retry', 'Resume',
+                          'Continue'],
+        'input_names': ['Prompt', 'Chat input', 'Cascade input'],
+        'sidebar_chrome': {
+            'back', 'forward', 'search', 'settings', 'history', 'chats',
+            'new chat', 'more options', 'pinned', 'recents', 'home',
+        },
+        'sidebar_prefixes': ('more options for ',),
+        'window_title_hint': None,
+        'experimental': True,
+    },
+    'copilot': {
+        'label': 'VS Code Copilot Chat',
+        # code.exe - весь редактор: без window_title_hint поймаем любое окно
+        'process': ['code.exe'],
+        'exclude_process_substrings': ['code - tunnel'],
+        'button_labels': ['Retry', 'Try again', 'Resume', 'Continue'],
+        'input_names': ['Prompt', 'Chat input', 'Ask Copilot'],
+        'sidebar_chrome': {
+            'back', 'forward', 'search', 'settings', 'history', 'chats',
+            'new chat', 'more actions', 'pinned', 'home',
+        },
+        'sidebar_prefixes': ('more options for ',),
+        'window_title_hint': 'Visual Studio Code',
+        'experimental': True,
+    },
+}
+
+
+def profile_names():
+    """Отсортированные ключи реестра (для UI и argparse choices)."""
+    return sorted(APP_PROFILES)
+
+
+def resolve_profile(name):
+    """Профиль по имени; неизвестное/пустое -> эталонный claude."""
+    key = (name or DEFAULT_PROFILE).strip().lower()
+    if key not in APP_PROFILES:
+        key = DEFAULT_PROFILE
+    return APP_PROFILES[key]
+
+
 # ── Парсер времени сброса лимита ─────────────────────────────────────────────
 _LIMIT_ABS = [
     # "resets at 3:45 PM", "resets at 5 PM", "resets at 15:30"

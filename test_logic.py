@@ -191,3 +191,39 @@ def test_run_headless_validates_before_uia(monkeypatch):
     # Валидация аргументов должна работать и без uiautomation (CI/ubuntu)
     ns = _cli_args(['--headless', '--at', '25:00'])
     assert app.run_headless(ns) == 2
+
+
+# --- Профили приложений (пивот) ---
+
+def test_resolve_profile_fallback():
+    assert app._resolve_profile(None)['label'] == 'Claude Desktop'
+    assert app._resolve_profile('no-such-app')['process'] == ['claude.exe']
+    assert app._resolve_profile('cursor')['label'] == 'Cursor'
+
+
+def test_every_profile_is_well_formed():
+    for name, prof in app.APP_PROFILES.items():
+        assert prof['process'], name
+        assert all(x == x.lower() for x in prof['process']), name
+        assert prof['button_labels'] and prof['input_names'], name
+        assert isinstance(prof['experimental'], bool), name
+
+
+def test_claude_profile_keeps_reference_behavior():
+    p = app.APP_PROFILES['claude']
+    assert 'Попробовать снова' in p['button_labels']
+    assert 'prompt' in [n.lower() for n in p['input_names']]
+    assert p['experimental'] is False
+
+
+def test_experimental_profiles_marked():
+    assert app.APP_PROFILES['cursor']['experimental'] is True
+    assert app.APP_PROFILES['windsurf']['experimental'] is True
+
+
+def test_cli_profile_choices_and_list():
+    ns = _cli_args(['--headless', '--profile', 'cursor'])
+    assert ns.profile == 'cursor'
+    import pytest as _pt
+    with _pt.raises(SystemExit):
+        _cli_args(['--headless', '--profile', 'nope'])

@@ -28,7 +28,8 @@ import threading, time, datetime, math, ctypes, json, re
 from collections import deque
 from engine import (parse_limit_text, has_limit_context,
                     next_reset_occurrence, cli_target as _cli_target,
-                    TRY_AGAIN_LABELS)
+                    APP_PROFILES, DEFAULT_PROFILE, profile_names,
+                    resolve_profile as _resolve_profile)
 if IS_WIN:
     from ctypes import wintypes
     try:
@@ -117,6 +118,8 @@ I18N = {
         'watch_label': 'Наблюдение — каждые',
         'sec': 'сек',
         'find_btn': '↻  Найти',
+        'profile_label': 'Приложение: {label}',
+        'log_profile_switched': 'Профиль: {from} → {to} — рескан окна',
         'app_not_found': '⚠ Claude Desktop не найден. Открой приложение и нажми «Найти».',
         'app_found_chats': '✓ {title}  —  чатов в сайдбаре: {n}',
         'app_found_no_sidebar': '✓ {title}  —  сайдбар не обнаружен, работаем с текущим видом',
@@ -147,7 +150,7 @@ I18N = {
         'log_watch': 'Наблюдение каждые {n}с.',
         'log_now': 'Ищу и нажимаю прямо сейчас…',
         'log_test': 'Тестовый поиск кнопки Try again (без переключения чатов, без Enter)…',
-        'log_no_app': 'Claude Desktop не найден.',
+        'log_no_app': '{app} не найден.',
         'log_btn_found': '✓ Кнопка "Try again" найдена на экране в области ({x}, {y})',
         'log_btn_not_found': 'Кнопка "Try again" не найдена в текущем виде окна '
                              '(это нормально, если нет активной ошибки лимита).',
@@ -238,6 +241,8 @@ I18N = {
         'watch_label': 'Watch mode — every',
         'sec': 'sec',
         'find_btn': '↻  Find',
+        'profile_label': 'App: {label}',
+        'log_profile_switched': 'Profile: {from} → {to} - rescan window',
         'app_not_found': '⚠ Claude Desktop not found. Open the app and click "Find".',
         'app_found_chats': '✓ {title}  —  chats in sidebar: {n}',
         'app_found_no_sidebar': '✓ {title}  —  sidebar not detected, using current view',
@@ -268,7 +273,7 @@ I18N = {
         'log_watch': 'Watching every {n}s.',
         'log_now': 'Searching and clicking right now…',
         'log_test': 'Test search for the Try again button (no chat switching, no Enter)…',
-        'log_no_app': 'Claude Desktop not found.',
+        'log_no_app': '{app} not found.',
         'log_btn_found': '✓ "Try again" button found on screen at ({x}, {y})',
         'log_btn_not_found': '"Try again" button not found in the current view '
                              '(this is normal if there\'s no active rate-limit error).',
@@ -346,6 +351,14 @@ I18N = {
         'log_failsafe': '⏹ Emergency stop: cursor in screen corner (FAILSAFE)',
     },
 }
+
+_CURRENT_PROFILE = {'name': DEFAULT_PROFILE}
+
+
+def _profile():
+    """Активный профиль приложений (см. engine.APP_PROFILES)."""
+    return _resolve_profile(_CURRENT_PROFILE['name'])
+
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 TPL_DIR = os.path.join(APP_DIR, 'templates')
@@ -457,26 +470,44 @@ def bring_to_foreground(hwnd, log_fn=lambda *a, **k: None) -> bool:
         return False
 
 
+def _profile_matches_window(prof, exe_path: str, title: str) -> bool:
+    """exe-имя из профиля + опциональный хинт по заголовку окна."""
+    low = (exe_path or '').lower()
+    base = low.rsplit('\\', 1)[-1]
+    if base not in prof['process']:
+        return False
+    for bad in prof.get('exclude_process_substrings', []):
+        if bad and bad in low:
+            return False
+    hint = prof.get('window_title_hint')
+    if hint and hint.lower() not in (title or '').lower():
+        return False
+    return True
+
+
 def find_claude_windows(log_fn=lambda *a, **k: None) -> list:
-    """Найти окна процесса Claude.exe (официальное десктоп-приложение)."""
+    """Найти окна приложения по активному профилю (claude/cursor/...).
+
+    Профиль задаёт exe-имя процесса, подстроки-исключения и опциональный
+    хинт по заголовку (например, для code.exe ищем 'Visual Studio Code')."""
     if IS_MAC:
         return _find_claude_windows_mac(log_fn)
     wins = []
     if not HAS_UIA:
         return wins
+    prof = _profile()
     try:
         auto.SetGlobalSearchTimeout(1)
         ctrl = auto.GetRootControl().GetFirstChildControl()
         while ctrl:
             hwnd = ctrl.NativeWindowHandle
-            if hwnd:
-                exe = get_process_exe(hwnd).lower()
-                # claude-code (CLI) тоже заканчивается на claude.exe — исключаем его
-                if exe.endswith('\\claude.exe') and 'claude-code' not in exe:
-                    wins.append({'title': ctrl.Name or 'Claude', 'hwnd': hwnd, 'ctrl': ctrl})
+            if hwnd and _profile_matches_window(
+                    prof, get_process_exe(hwnd), ctrl.Name or ''):
+                wins.append({'title': ctrl.Name or prof['label'],
+                             'hwnd': hwnd, 'ctrl': ctrl})
             ctrl = ctrl.GetNextSiblingControl()
     except Exception as e:
-        log_fn(f'  Ошибка поиска окна Claude: {e}', 'dim')
+        log_fn(f'  Ошибка поиска окна ({prof["label"]}): {e}', 'dim')
     return wins
 
 
@@ -484,27 +515,16 @@ def find_claude_windows(log_fn=lambda *a, **k: None) -> list:
 #  ПОИСК ЧАТОВ В САЙДБАРЕ (переключение внутри одного окна)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Названия элементов навигации сайдбара, которые НЕ являются чатами
-# (Claude Desktop не даёт им отдельной ARIA-роли, поэтому фильтруем по Name)
-SIDEBAR_CHROME = {
-    'back', 'collapse sidebar', 'expand sidebar', 'forward', 'menu', 'search',
-    'sidebar', 'mode', 'chat', 'code', 'cowork', 'new session', 'routines',
-    'dispatch', 'dispatch beta', 'beta', 'customize', 'more navigation items',
-    'pinned', 'recents', 'filter', 'home', 'new',
-}
-# 'show ' как префикс вырезал настоящие чаты вида "Show me how to…" —
-# оставляем только конкретные служебные пункты.
-SIDEBAR_CHROME_PREFIXES = ('more options for ', 'show more', 'show less',
-                           'show all', 'relaunch to update')
-
-
 def _is_real_chat_name(name: str) -> bool:
+    """Фильтр обвязки сайдбара по словарям активного профиля."""
+    prof = _profile()
     low = name.strip().lower()
-    if not low or low in SIDEBAR_CHROME:
+    if not low or low in prof['sidebar_chrome']:
         return False
-    if any(low.startswith(p) for p in SIDEBAR_CHROME_PREFIXES):
+    if any(low.startswith(px) for px in prof['sidebar_prefixes']):
         return False
     return True
+
 
 
 def _find_sidebar_container(window_ctrl, max_depth=15):
@@ -553,7 +573,9 @@ def find_message_input(window_ctrl, log_fn, max_nodes=6000, time_budget=3.0):
         ctrl = stack.pop()
         visited += 1
         try:
-            if ctrl.ControlTypeName == 'GroupControl' and (ctrl.Name or '').strip() == 'Prompt':
+            nm = (ctrl.Name or '').strip().lower()
+            if (ctrl.ControlTypeName == 'GroupControl'
+                    and nm in [n.lower() for n in _profile()['input_names']]):
                 rect = ctrl.BoundingRectangle
                 if rect and rect.width() > 0 and rect.height() > 0:
                     return rect
@@ -953,7 +975,7 @@ def _run_cycle_impl(n_or_indices, search_try_again: bool, auto_continue: bool,
 
     windows = find_claude_windows(log_fn)
     if not windows:
-        log_fn('  ⚠ Приложение Claude Desktop не найдено', 'error')
+        log_fn(f'  ⚠ Приложение {_profile()["label"]} не найдено', 'error')
         return 0
 
     window = windows[0]
@@ -974,7 +996,8 @@ def _run_cycle_impl(n_or_indices, search_try_again: bool, auto_continue: bool,
 
         if search_try_again:
             if badge_fn: badge_fn(1, 'trying')
-            _, rect = find_button_uia(window['ctrl'], TRY_AGAIN_LABELS, log_fn)
+            _, rect = find_button_uia(window['ctrl'],
+                              _profile()['button_labels'], log_fn)
             if rect:
                 if badge_fn: badge_fn(1, 'ok')
                 if click_rect(rect, log_fn, press_enter_after=False):
@@ -1552,6 +1575,8 @@ class App:
         self._cfg: dict = {}       # загруженные настройки
 
         self._load_settings()
+        _CURRENT_PROFILE['name'] = getattr(self, '_cfg_profile',
+                                           DEFAULT_PROFILE)
         self._apply_theme_vars()
         self._check_deps()
         self._build()
@@ -1636,6 +1661,8 @@ class App:
         self.lang = lang if lang in I18N else 'ru'
         theme = d.get('theme', 'dark')
         self._theme = theme if theme in THEMES else 'dark'
+        prof = str(d.get('profile', DEFAULT_PROFILE)).strip().lower()
+        self._cfg_profile = prof if prof in APP_PROFILES else DEFAULT_PROFILE
         plan = []
         for x in d.get('plan', []):
             try:
@@ -2209,6 +2236,13 @@ class App:
 
         wh = tk.Frame(wc, bg=C1)
         wh.pack(fill='x')
+        self.btn_profile = FlatBtn(
+            wh, text=self.t('profile_label',
+                            label=_profile()['label']),
+            cmd=self._cycle_profile,
+            bg=C2, fg=DIM, hbg=BRD, hfg=TXT,
+            font=('Segoe UI', 8), padx=10, pady=4)
+        self.btn_profile.pack(side='left', padx=(0, 8))
         tk.Label(wh, text='Claude Desktop', bg=C1, fg=DIM,
                  font=('Segoe UI', 9, 'bold')).pack(side='left')
         self.btn_find = FlatBtn(wh, self.t('find_btn'), self._scan_now,
@@ -2465,6 +2499,9 @@ class App:
         self.chk_watch.config(text=self.t('watch_label'))
         self.lbl_sec.config(text=self.t('sec'))
         self.btn_find.config(text=self.t('find_btn'))
+        if hasattr(self, 'btn_profile'):
+            self.btn_profile.config(text=self.t(
+                'profile_label', label=_profile()['label']))
         self.lbl_switch_first.config(text=self.t('switch_first'))
         self._update_selected_label()
         self.lbl_per_chat.config(text=self.t('per_chat'))
@@ -2538,6 +2575,18 @@ class App:
                 scrollregion=self._main_canvas.bbox('all')))
 
     # ── Сканирование окна и чатов ────────────────────────────────────────────
+
+    def _cycle_profile(self):
+        """Следующий профиль из реестра + рескан окна под новое exe."""
+        names = profile_names()
+        cur = _CURRENT_PROFILE['name']
+        nxt = names[(names.index(cur) + 1) % len(names)]
+        _CURRENT_PROFILE['name'] = nxt
+        self._save_settings()
+        self._log(self.t('log_profile_switched',
+                         **{'from': cur, 'to': nxt}), 'accent')
+        self._update_scan(self._last_windows, [])
+        self._scan_now()
 
     def _scan_now(self):
         def run():
@@ -2920,10 +2969,11 @@ class App:
         def run():
             windows = find_claude_windows(self._slog)
             if not windows:
-                self._slog(self.t('log_no_app'), 'error')
+                self._slog(self.t('log_no_app', app=_profile()['label']), 'error')
                 return
             self._badge(1, 'trying')
-            _, rect = find_button_uia(windows[0]['ctrl'], TRY_AGAIN_LABELS, self._slog)
+            _, rect = find_button_uia(windows[0]['ctrl'],
+                                _profile()['button_labels'], self._slog)
             if rect:
                 self._badge(1, 'ok')
                 self._slog(self.t('log_btn_found', x=int(rect.left), y=int(rect.top)), 'success')
@@ -2964,7 +3014,7 @@ class App:
         windows = find_claude_windows(self._slog)
         if not windows:
             self.root.after(0, lambda: self._lt_set_result(
-                self.t('log_no_app'), ERR))
+                self.t('log_no_app', app=_profile()['label']), ERR))
             return
         result = find_limit_in_all_chats(windows[0], self._slog)
         if result:
@@ -3293,6 +3343,11 @@ def _build_cli_parser():
     p = argparse.ArgumentParser(
         prog='claude_continue_gui.py',
         description='Claude Code Auto-Continue: GUI (по умолчанию) или headless-режим.')
+    p.add_argument('--profile', default=None, choices=profile_names(),
+                   help='профиль приложения (%s)'
+                        % '|'.join(profile_names()))
+    p.add_argument('--list-profiles', action='store_true',
+                   help='показать доступные профили и выйти')
     p.add_argument('--headless', action='store_true',
                    help='работать без окна: таймер/циклы в консоли')
     p.add_argument('--at', metavar='HH:MM', default=None,
@@ -3341,7 +3396,11 @@ def _headless_logger(log_file=None):
 
 def run_headless(args) -> int:
     """CLI-движок поверх того же run_cycle, что и GUI (#17)."""
+    if args.profile:
+        _CURRENT_PROFILE['name'] = args.profile
     log = _headless_logger(args.log_file)
+    prof = _profile()
+    log(f"Профиль приложения: {prof['label']}")
 
     try:
         n_chats = max(1, int(str(args.chats).strip()))
@@ -3413,13 +3472,22 @@ def run_headless(args) -> int:
 
 _CLI_FLAGS = ('--headless', '--now', '--at', '--chats', '--once',
               '--interval', '--no-try-again', '--no-continue',
-              '--confidence', '--log-file', '-h', '--help')
+              '--confidence', '--log-file', '--profile', '--list-profiles',
+              '-h', '--help')
 
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if any(a in argv or a.startswith('--at=') for a in _CLI_FLAGS):
+    if any(a in argv or a.startswith('--at=')
+           or a.startswith('--profile=') for a in _CLI_FLAGS):
         args = _build_cli_parser().parse_args(argv)
+        if args.list_profiles:
+            print('Доступные профили приложений:')
+            for name in profile_names():
+                pr = APP_PROFILES[name]
+                mark = ' (experimental)' if pr['experimental'] else ''
+                print(f'  {name:<9} {pr["label"]}{mark}')
+            return
         sys.exit(run_headless(args))
     if IS_WIN:
         try:

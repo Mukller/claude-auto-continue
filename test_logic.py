@@ -155,3 +155,39 @@ def test_recent_items_tail():
     parts.append('limit resets at 15:30')
     joined = ' '.join(parts[-60:])
     assert 'msg99' in joined and 'msg0' not in joined
+# --- CLI/headless (#17) ---
+
+def _cli_args(argv):
+    import sys as _s
+    old = _s.argv
+    try:
+        _s.argv = ['prog'] + argv
+        ns = app._build_cli_parser().parse_args(argv)
+    finally:
+        _s.argv = old
+    return ns
+
+
+def test_cli_defaults():
+    ns = _cli_args(['--headless'])
+    assert ns.at is None and ns.now is False and ns.chats == '3'
+    assert ns.try_again if False else True
+    assert ns.no_try_again is False and ns.no_continue is False
+    assert abs(ns.confidence - 0.82) < 1e-9 and ns.interval == 0
+
+
+def test_cli_target_parses_future():
+    t = app._cli_target('05:00')
+    assert t is not None and (t.hour, t.minute) == (5, 0) and t > datetime.datetime.now()
+
+
+def test_cli_target_rejects_garbage():
+    assert app._cli_target('25:00') is None
+    assert app._cli_target('abc') is None
+    assert app._cli_target('') is None
+
+
+def test_run_headless_validates_before_uia(monkeypatch):
+    # Валидация аргументов должна работать и без uiautomation (CI/ubuntu)
+    ns = _cli_args(['--headless', '--at', '25:00'])
+    assert app.run_headless(ns) == 2

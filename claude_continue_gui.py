@@ -3435,9 +3435,19 @@ def _build_cli_parser():
 
 
 def _headless_logger(log_file=None):
+    # Windows-консоль часто в cp1251: эмодзи из движка (⚠/✓) роняют print.
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
     def log(msg, tag=''):
         line = f'[{datetime.datetime.now():%H:%M:%S}] {msg}'
-        print(line, flush=True)
+        try:
+            print(line, flush=True)
+        except UnicodeEncodeError:
+            enc = sys.stdout.encoding or 'ascii'
+            print(line.encode(enc, errors='replace').decode(enc), flush=True)
         if log_file:
             try:
                 with open(log_file, 'a', encoding='utf-8') as f:
@@ -3447,9 +3457,37 @@ def _headless_logger(log_file=None):
     return log
 
 
+def _cli_target(at_str):
+    """'HH:MM' -> ближайший будущий datetime; None при невалидной строке."""
+    m = re.fullmatch(r'(\d{1,2}):(\d{2})', str(at_str).strip())
+    if not m:
+        return None
+    h, mn = int(m.group(1)), int(m.group(2))
+    if not (0 <= h <= 23 and 0 <= mn <= 59):
+        return None
+    now = datetime.datetime.now()
+    t = now.replace(hour=h, minute=mn, second=0, microsecond=0)
+    if t <= now:
+        t += datetime.timedelta(days=1)
+    return t
+
+
 def run_headless(args) -> int:
     """CLI-движок поверх того же run_cycle, что и GUI (#17)."""
     log = _headless_logger(args.log_file)
+
+    try:
+        n_chats = max(1, int(str(args.chats).strip()))
+    except ValueError:
+        n_chats = 3
+
+    if args.at is not None and _cli_target(args.at) is None:
+        log(f'--at: ожидалось HH:MM (00:00..23:59), получено «{args.at}»', 'error')
+        return 2
+    if not (0.5 <= float(args.confidence) <= 0.99):
+        log('--confidence: ожидается значение от 0.5 до 0.99', 'error')
+        return 2
+
     if IS_WIN and not HAS_UIA:
         log('uiautomation не установлен: pip install uiautomation', 'error')
         return 2
@@ -3457,10 +3495,6 @@ def run_headless(args) -> int:
         log('pyautogui не установлен: pip install pyautogui pillow', 'error')
         return 2
 
-    try:
-        n_chats = max(1, int(str(args.chats).strip()))
-    except ValueError:
-        n_chats = 3
     indices = list(range(max(0, n_chats))) or [0]
     try_again = not args.no_try_again
     auto_cont = not args.no_continue
@@ -3479,20 +3513,8 @@ def run_headless(args) -> int:
         cycle()
         return 0
 
-    target = None
-    if args.at:
-        m = re.fullmatch(r'(\d{1,2}):(\d{2})', args.at.strip())
-        if not m:
-            log(f'--at: ожидалось HH:MM, получено «{args.at}»', 'error')
-            return 2
-        h, mn = int(m.group(1)), int(m.group(2))
-        if not (0 <= h <= 23 and 0 <= mn <= 59):
-            log(f'--at: время вне диапазона: {args.at}', 'error')
-            return 2
-        now = datetime.datetime.now()
-        target = now.replace(hour=h, minute=mn, second=0, microsecond=0)
-        if target <= now:
-            target += datetime.timedelta(days=1)
+    target = _cli_target(args.at) if args.at else None
+    if target is not None:
         log(f'Срабатывание в {target:%d.%m.%Y %H:%M}')
 
     while target is not None:
@@ -3522,14 +3544,16 @@ def run_headless(args) -> int:
     return 0
 
 
+_CLI_FLAGS = ('--headless', '--now', '--at', '--chats', '--once',
+              '--interval', '--no-try-again', '--no-continue',
+              '--confidence', '--log-file', '-h', '--help')
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if '--headless' in argv or '--now' in argv or '--at' in argv:
+    if any(a in argv or a.startswith('--at=') for a in _CLI_FLAGS):
         args = _build_cli_parser().parse_args(argv)
-        if not IS_WIN and not IS_MAC and not args.headless:
-            pass
-        if args.headless or args.now or args.at:
-            sys.exit(run_headless(args))
+        sys.exit(run_headless(args))
     if IS_WIN:
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)

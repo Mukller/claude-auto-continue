@@ -1305,7 +1305,7 @@ class FlatBtn(tk.Canvas):
         self._hovering = False
 
         outer = kw.pop('bg', None) or parent.cget('bg')
-        bw, bh = self._measure(parent, text, font, padx, pady)
+        bw, bh = self._measure(parent)
 
         # NB: не называть self._w/self._h — эти имена зарезервированы
         # внутри tkinter.Misc (self._w хранит Tk-путь виджета) и будут
@@ -1321,16 +1321,6 @@ class FlatBtn(tk.Canvas):
         self.bind('<ButtonPress-1>', self._on_press)
         self.bind('<ButtonRelease-1>', self._on_release)
 
-    @staticmethod
-    def _measure(parent, text, font, padx, pady) -> tuple:
-        """Требуемый размер кнопки под текст (нужен и при config(text=...):
-        новая надпись может быть длиннее/короче — иначе канвас обрезает её)."""
-        tmp = tk.Label(parent, text=text, font=font)
-        tmp.update_idletasks()
-        bw = tmp.winfo_reqwidth() + padx * 2
-        bh = tmp.winfo_reqheight() + pady * 2
-        tmp.destroy()
-        return bw, bh
 
     # ── отрисовка ───────────────────────────────────────────────────────────
 
@@ -1409,11 +1399,10 @@ class FlatBtn(tk.Canvas):
         if 'text' in kwargs:
             self._text = kwargs.pop('text')
             try:
-                bw, bh = self._measure(self.master, self._text,
-                                       self._font, self._padx, self._pady)
+                bw, bh = self._measure(self.master)
                 if (bw, bh) != (self._bw, self._bh):
                     self._bw, self._bh = bw, bh
-                    self.configure(width=bw, height=bh)
+                    super().config(width=bw, height=bh)
             except Exception:
                 pass
             self._draw(self._cur_bg, self._fg)
@@ -1601,10 +1590,10 @@ class App:
         self._lt_prev_time = None
         self._lt_prev_dt = None  # «дубль» честен, только пока срок прошлого сброса не наступил
         self._lt_dup_count = 0
+        self._lt_gen = 0         # поколение автоскан-воркера (выкл→вкл гасит старого)
         self._lt_next_scan_time = None
         self._lt_auto_stop_evt = threading.Event()
         self._lt_auto_stop_evt.set()
-        self._lt_worker_alive = False
         self._target   = None
         self._total_s  = 1.0
         self._chats_preview = []
@@ -3012,11 +3001,12 @@ class App:
                 self._slog(self.t('log_cont_note'), 'dim')
         threading.Thread(target=run, daemon=True).start()
 
-    def _lt_auto_disable_duplicate(self):
-        """Дубль (то же время два скана подряд) — глушим автоскан в главном потоке."""
-        self._lt_set_result(self.t('limit_tracker_duplicate'), WARN)
-        self.v_lt_auto.set(False)
-        self._lt_toggle_auto()
+        """Дубль (то же время подряд). Предупреждаем со второго раза,
+        глушим автоскан только после третьего: ежедневный лимит легитимно
+        сбрасывается в одно и то же время каждый день."""
+        if dup_count >= 3:
+            self.v_lt_auto.set(False)
+            self._lt_toggle_auto()
         self._log(self.t('limit_tracker_duplicate'), 'warn')
 
     def _lt_scan(self):
@@ -3056,17 +3046,14 @@ class App:
             if len(self._lt_history) > 3:
                 self._lt_history.pop()
 
-            # Дубль: то же время подряд. Один повтор — это норма для
-            # ежедневного лимита (сброс всегда в 05:00), поэтому автоскан
-            # отключаем только после ТРЁХ одинаковых результатов подряд.
-            prev_alive = (self._lt_prev_dt is not None
-                          and self._lt_prev_dt > datetime.datetime.now())
             # Дубль: то же время подряд И прежний срок ещё не наступил (#6).
             # Строки HH:MM равны у любых двух сканов внутри одного окна сброса.
             prev_alive = (self._lt_prev_dt is not None
                           and self._lt_prev_dt > datetime.datetime.now())
             if self._lt_prev_time == time_str and prev_alive:
-                self.root.after(0, self._lt_auto_disable_duplicate)
+                self._lt_dup_count = getattr(self, '_lt_dup_count', 0) + 1
+                self.root.after(0, lambda c=self._lt_dup_count:
+                                self._lt_auto_disable_duplicate(c))
                 return
 
             self._lt_prev_time = time_str
@@ -3137,20 +3124,31 @@ class App:
         except Exception:
             pass
 
+    def _lt_auto_disable_duplicate(self, dup_count: int):
+        """Дубль (то же время подряд). Предупреждаем со второго раза,
+        глушим автоскан только после третьего: ежедневный лимит легитимно
+        сбрасывается в одно и то же время каждый день."""
+        self._lt_set_result(self.t('limit_tracker_duplicate'), WARN)
+        if dup_count >= 3:
+            self.v_lt_auto.set(False)
+            self._lt_toggle_auto()
+        self._log(self.t('limit_tracker_duplicate'), 'warn')
+
     def _lt_toggle_auto(self):
-        """Включить/выключить автосканирование. Поколение (_lt_gen) гарантирует,
-        что после быстрого выкл→вкл старый воркер не продолжит жить параллельно
-        с новым (оба ждали на одном Event и стартовывали дважды)."""
+        """Включить/выключить автосканирование.
+
+        Поколение (_lt_gen) - единственный механизм жизни воркера: каждое
+        включение стартует новый поток, все устаревшие (gen != _lt_gen)
+        умирают в течение секунды сами. Это исключает и гонку быстрого
+        выкл->вкл, и зомби-сканер при пересоздании состояния сменой темы."""
         if self.v_lt_auto.get():
-            # Event один на всё время жизни приложения (создан в __init__):
-            # смена темы его не пересоздаёт, поэтому чекбокс всегда управляет
-            # именно работающим воркером, а не создаёт параллельный сканер.
+            self._lt_gen = getattr(self, '_lt_gen', 0) + 1
+            gen = self._lt_gen
             self._lt_auto_stop_evt.clear()
             self._lt_next_scan_time = datetime.datetime.now()
             self._save_settings()
-            if not self._lt_worker_alive:
-                self._lt_worker_alive = True
-                threading.Thread(target=self._lt_auto_worker, daemon=True).start()
+            threading.Thread(target=self._lt_auto_worker, args=(gen,),
+                             daemon=True).start()
             self._slog(self.t('log_lt_auto_on'), 'dim')
         else:
             self._lt_gen = getattr(self, '_lt_gen', 0) + 1  # старый умрёт по поколению
@@ -3160,35 +3158,33 @@ class App:
             self._slog(self.t('log_lt_auto_off'), 'dim')
 
     def _lt_auto_worker(self, gen: int):
-        """Фоновый worker — сканирует лимит каждый интервал (15-120 мин)."""
-        try:
-            while not self._lt_auto_stop_evt.is_set():
-                interval = self.sp_lt_interval.get() * 60  # в секунды
-                self._lt_next_scan_time = datetime.datetime.now() + datetime.timedelta(seconds=interval)
+        """Фоновый worker: сканирует лимит каждые N минут (15-120),
+        живёт ровно пока актуально его поколение."""
+        while ((not self._lt_auto_stop_evt.is_set())
+               and gen == getattr(self, '_lt_gen', 0)):
+            interval = max(15, min(120, int(self.sp_lt_interval.get()))) * 60
+            self._lt_next_scan_time = datetime.datetime.now() + datetime.timedelta(seconds=interval)
 
-                # Цикл ожидания с обновлением таймера
-                for sec in range(interval):
-                    if self._lt_auto_stop_evt.is_set():
-                        return
-                    # Каждые 10 секунд обновляем время до следующего сканирования
-                    if sec % 10 == 0:  # каждые 10 секунд
-                        if self._lt_next_scan_time:
-                            left = (self._lt_next_scan_time - datetime.datetime.now()).total_seconds()
-                            if left > 0:
-                                min_left = int(left) // 60
-                                try:
-                                    self.root.after(0, lambda m=min_left: self._lt_set_status(
-                                        self.t('limit_tracker_next', min=m)))
-                                except RuntimeError:
-                                    return  # приложение закрывается
-                    self._lt_auto_stop_evt.wait(1)
+            # Ожидание с обновлением счётчика раз в 10 секунд
+            for sec in range(interval):
+                if (self._lt_auto_stop_evt.is_set()
+                        or gen != getattr(self, '_lt_gen', 0)):
+                    return
+                if sec % 10 == 0 and self._lt_next_scan_time:
+                    left = (self._lt_next_scan_time
+                            - datetime.datetime.now()).total_seconds()
+                    if left > 0:
+                        min_left = int(left) // 60
+                        try:
+                            self.root.after(0, lambda m=min_left: self._lt_set_status(
+                                self.t('limit_tracker_next', min=m)))
+                        except RuntimeError:
+                            return  # приложение закрывается
+                self._lt_auto_stop_evt.wait(1)
 
-                if not self._lt_auto_stop_evt.is_set():
-                    self._lt_scan()
-        finally:
-            self._lt_worker_alive = False
-
-    # ── План запусков (несколько времён/циклов) ──────────────────────────────
+            if (not self._lt_auto_stop_evt.is_set()
+                    and gen == getattr(self, '_lt_gen', 0)):
+                self._lt_scan()
 
     def _plan_add(self):
         h, m = self.sp_plan_h.get(), self.sp_plan_m.get()
@@ -3355,7 +3351,134 @@ class App:
 #  ЗАПУСК
 # ══════════════════════════════════════════════════════════════════════════════
 
-def main():
+# ══════════════════════════════════════════════════════════════════════════════
+#  CLI / HEADLESS РЕЖИМ (#17)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _build_cli_parser():
+    import argparse
+    p = argparse.ArgumentParser(
+        prog='claude_continue_gui.py',
+        description='Claude Code Auto-Continue: GUI (по умолчанию) или headless-режим.')
+    p.add_argument('--headless', action='store_true',
+                   help='работать без окна: таймер/циклы в консоли')
+    p.add_argument('--at', metavar='HH:MM', default=None,
+                   help='время срабатывания (как СТАРТ в GUI); без --once дальше watch')
+    p.add_argument('--now', action='store_true',
+                   help='выполнить цикл сразу и выйти (экран «Сейчас»)')
+    p.add_argument('--chats', metavar='N', default='3',
+                   help='сколько первых чатов обрабатывать (по умолчанию 3)')
+    p.add_argument('--once', action='store_true',
+                   help='один цикл по --at и выход (без watch)')
+    p.add_argument('--interval', metavar='SEC', type=int, default=0,
+                   help='режим наблюдения: повторять каждые SEC секунд')
+    p.add_argument('--no-try-again', action='store_true',
+                   help='не искать кнопку Try again')
+    p.add_argument('--no-continue', action='store_true',
+                   help='не нажимать Enter для продолжения сессии')
+    p.add_argument('--confidence', type=float, default=0.82,
+                   help='точность резервного поиска по шаблону (0.5..0.99)')
+    p.add_argument('--log-file', metavar='PATH', default=None,
+                   help='дополнительно писать лог в файл')
+    return p
+
+
+def _headless_logger(log_file=None):
+    def log(msg, tag=''):
+        line = f'[{datetime.datetime.now():%H:%M:%S}] {msg}'
+        print(line, flush=True)
+        if log_file:
+            try:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(line + '\n')
+            except Exception:
+                pass
+    return log
+
+
+def run_headless(args) -> int:
+    """CLI-движок поверх того же run_cycle, что и GUI (#17)."""
+    log = _headless_logger(args.log_file)
+    if IS_WIN and not HAS_UIA:
+        log('uiautomation не установлен: pip install uiautomation', 'error')
+        return 2
+    if pyautogui is None:
+        log('pyautogui не установлен: pip install pyautogui pillow', 'error')
+        return 2
+
+    try:
+        n_chats = max(1, int(str(args.chats).strip()))
+    except ValueError:
+        n_chats = 3
+    indices = list(range(max(0, n_chats))) or [0]
+    try_again = not args.no_try_again
+    auto_cont = not args.no_continue
+    conf = min(0.99, max(0.5, float(args.confidence)))
+    opts_note = f'чаты={n_chats}, try_again={try_again}, continue={auto_cont}, conf={conf}'
+    log(f'Headless-режим запущен ({opts_note})')
+
+    def cycle():
+        ok = run_cycle(indices, try_again, auto_cont, conf, log)
+        log(f'Цикл завершён: обработано {ok} чат(ов)',
+            'success' if ok else 'error')
+        return ok
+
+    # Мгновенный прогон (--now) либо ожидание --at
+    if args.now:
+        cycle()
+        return 0
+
+    target = None
+    if args.at:
+        m = re.fullmatch(r'(\d{1,2}):(\d{2})', args.at.strip())
+        if not m:
+            log(f'--at: ожидалось HH:MM, получено «{args.at}»', 'error')
+            return 2
+        h, mn = int(m.group(1)), int(m.group(2))
+        if not (0 <= h <= 23 and 0 <= mn <= 59):
+            log(f'--at: время вне диапазона: {args.at}', 'error')
+            return 2
+        now = datetime.datetime.now()
+        target = now.replace(hour=h, minute=mn, second=0, microsecond=0)
+        if target <= now:
+            target += datetime.timedelta(days=1)
+        log(f'Срабатывание в {target:%d.%m.%Y %H:%M}')
+
+    while target is not None:
+        rem = (target - datetime.datetime.now()).total_seconds()
+        if rem <= 0:
+            break
+        time.sleep(min(1.0, rem))
+    if target is not None:
+        for attempt in range(1, 4):
+            log(f'Попытка {attempt}/3')
+            if cycle():
+                break
+            if attempt < 3:
+                time.sleep(5)
+
+    if args.once or args.interval <= 0:
+        log('Готово.')
+        return 0
+
+    log(f'Наблюдение каждые {args.interval} с (Ctrl+C — выход)')
+    try:
+        while True:
+            time.sleep(args.interval)
+            cycle()
+    except KeyboardInterrupt:
+        log('Остановлено пользователем.')
+    return 0
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if '--headless' in argv or '--now' in argv or '--at' in argv:
+        args = _build_cli_parser().parse_args(argv)
+        if not IS_WIN and not IS_MAC and not args.headless:
+            pass
+        if args.headless or args.now or args.at:
+            sys.exit(run_headless(args))
     if IS_WIN:
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
@@ -3363,7 +3486,7 @@ def main():
             pass
     root = tk.Tk()
     # Масштаб от фактического DPI, а не хардкод: на 100%-мониторах при 1.35
-    # всё разъезжается, на 200% — наоборот мелко.
+    # всё разъезжается, на 200% - наоборот мелко.
     try:
         dpi = root.winfo_fpixels('1i')
         root.tk.call('tk', 'scaling', max(1.0, min(2.0, dpi / 72)))

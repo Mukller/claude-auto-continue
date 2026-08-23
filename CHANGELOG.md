@@ -6,6 +6,54 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.9.0] - 2026-08-23
+### Fixed
+- **FAILSAFE re-enabled** — `pyautogui.FAILSAFE = False` was removed. A stuck cycle
+  (mouse hijacked by automation) can now be aborted instantly by flinging the cursor
+  into a screen corner; the cycle exits cleanly with a log message instead of being
+  swallowed by a generic `except`.
+- **Concurrent cycles serialized** — "Now" button, timer worker, plan worker and
+  limit-tracker scans could run `run_cycle` at the same time and fight over the mouse.
+  All cycles now go through a single lock (`_do_cycle`); overlapping triggers are
+  skipped with a warning, tracker scans are guarded by their own lock.
+- **Invalid watch interval no longer kills the worker** — non-numeric input in the
+  interval Spinbox raised `ValueError` inside the background thread, which died silently
+  and left the UI stuck in STOP state. Interval is now validated and clamped (5–600 s).
+- **Options snapshotted on START** — the timer/plan workers used to read Tkinter
+  variables from background threads (unsafe) mid-run. All options (chats, actions,
+  confidence, watch, retry, notifications) are now captured in the main thread when
+  START / plan start is pressed.
+- **`pending_iso` cleared on STOP** — stopping the countdown didn't rewrite
+  settings.json, so an app crash after STOP resurrected the stopped timer on next launch.
+- **Fired one-off plan times are persisted** — removing a triggered one-off time only
+  mutated memory; it came back after restart. Removal now happens on the main thread
+  with an immediate settings save.
+- **Theme switch keeps running state** — switching theme while a timer/plan was active
+  rebuilt the UI showing an idle START button; active-state visuals are restored.
+- **Badge colors follow the theme** — badge state colors were frozen at class definition
+  with the dark palette and stayed wrong in light mode.
+- **Template status shows real size** — the template row reported the thumbnail size
+  instead of the captured image size.
+- **Multi-monitor template capture** — the capture overlay was fullscreen-primary-only
+  and screenshots missed secondary monitors; the overlay now spans the virtual desktop
+  and `ImageGrab.grab(all_screens=True)` is used on Windows.
+- **Limit tracker returns to first chat** — scanning left Claude Desktop switched to the
+  last visited chat; it now restores the first chat afterwards and caps scans at 30 chats.
+- **macOS scrolling fixed** — scroll delta was always divided by 120 (Windows convention),
+  making lists barely move on Mac.
+- **Sidebar chat filter false positives** — the `'show '` chrome-prefix filter dropped real
+  chats titled e.g. "Show me how to…"; replaced with explicit service items.
+- **Settings validation** — corrupted settings.json (unknown lang/theme, malformed plan or
+  history entries) crashed the app on startup; values are now sanitized.
+- **run.bat portability** — hardcoded personal Python path replaced with py-launcher /
+  PATH lookup; requirements.txt got a `sys_platform == "win32"` marker for uiautomation.
+
+### Changed
+- Remaining hardcoded Russian labels ("Интервал:", "мин", "История сбросов:", retry and
+  notification checkboxes, auto-scan logs) moved into the i18n table and retranslate on
+  language switch.
+- Plan status countdown now refreshes every second while the plan runs.
+
 ## [3.8.0]
 ### Added
 - **macOS support** — the app now runs on macOS in addition to Windows. On Mac, Claude

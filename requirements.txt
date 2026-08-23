@@ -1,6 +1,6 @@
-pyautogui
-pillow
-opencv-python-headless
-uiautomation         # Windows only — required for UIA button/chat search
-pystray              # optional: system tray support
-plyer                # optional: desktop notifications
+pyautogui>=0.9.54
+pillow>=10.0
+pystray>=0.19
+plyer>=2.1
+opencv-python-headless>=4.8
+uiautomation>=2.0.20; sys_platform == "win32"

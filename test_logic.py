@@ -109,3 +109,49 @@ class AppStub:
 
 
 AppStub._plan_next_targets = app.App._plan_next_targets
+
+
+# --- parse_limit_text: контекст limit/usage (#16) ---
+
+def test_context_required_rejects_bare_history_mention():
+    text = 'we discussed that the job resets at 15:30 back then'
+    assert app.parse_limit_text(text, NOW, require_context=True) is None
+    # без требования контекста - старое поведение
+    assert app.parse_limit_text(text, NOW) == (15, 30)
+
+
+def test_context_required_accepts_real_limit_message():
+    text = ('You have reached your usage limit. '
+            'Your plan resets at 15:30.')
+    assert app.parse_limit_text(text, NOW, require_context=True) == (15, 30)
+
+
+def test_context_russian_keyword():
+    text = 'Лимит исчерпан. Обновится в 09:05.'
+    assert app.parse_limit_text(text, NOW, require_context=True) == (9, 5)
+
+
+def test_context_window_is_local_not_global():
+    # слово limit далеко (за пределами окна 120 знаков) от времени
+    filler = 'x' * 200
+    text = 'limit reached. ' + filler + ' task scheduled at 15:30'
+    assert app.parse_limit_text(text, NOW, require_context=True) is None
+
+
+def test_duration_with_context():
+    text = 'Usage limit reached. Try again in 2 hours and 45 minutes.'
+    assert app.parse_limit_text(text, NOW, require_context=True) == (14, 45)
+
+
+def test_has_limit_context_spans():
+    t = 'your usage limit resets at 15:30'
+    i = t.find('15:30')
+    assert app.has_limit_context(t, i, i + 5)
+    assert not app.has_limit_context('nothing here', 0, 12)
+
+
+def test_recent_items_tail():
+    parts = ['msg%d' % k for k in range(100)]
+    parts.append('limit resets at 15:30')
+    joined = ' '.join(parts[-60:])
+    assert 'msg99' in joined and 'msg0' not in joined

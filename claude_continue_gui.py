@@ -796,8 +796,15 @@ _LIMIT_DUR = [
 ]
 
 
-def _collect_window_text(root_ctrl, max_nodes=50000, time_budget=15.0) -> str:
-    """Собрать весь текст из дерева UI-элементов окна (без ограничений)."""
+def _collect_window_text(root_ctrl, max_nodes=50000, time_budget=15.0,
+                         exclude_rect=None, recent_items=None) -> str:
+    """Собрать текст из дерева UI-элементов окна.
+
+    exclude_rect — RECT-границы сайдбара: поддеревья целиком внутри них
+    пропускаются (и не обходятся), чтобы старые названия чатов и прочая
+    обвязка не попадали в анализ трекера лимита (#16).
+    recent_items — взять только последние N текстовых узлов: актуальное
+    сообщение о лимите всегда в конце истории чата."""
     parts = []
     stack = [root_ctrl]
     visited = 0
@@ -810,6 +817,14 @@ def _collect_window_text(root_ctrl, max_nodes=50000, time_budget=15.0) -> str:
         if visited > max_nodes:
             break
         try:
+            if exclude_rect is not None:
+                r = ctrl.BoundingRectangle
+                # Поддерево целиком в зоне исключения — срезаем его целиком
+                if (r and r.left >= exclude_rect.left - 8
+                        and r.right <= exclude_rect.right + 8
+                        and r.top >= exclude_rect.top - 8
+                        and r.bottom <= exclude_rect.bottom + 8):
+                    continue
             name = (ctrl.Name or '').strip()
             if name:
                 parts.append(name)
@@ -821,7 +836,24 @@ def _collect_window_text(root_ctrl, max_nodes=50000, time_budget=15.0) -> str:
             stack.extend(kids)
         except Exception:
             continue
+    if recent_items:
+        parts = parts[-int(recent_items):]
     return ' '.join(parts)
+
+
+# Контекст настоящих сообщений об ограничении (#16): рядом со временем
+# сброса почти всегда есть слово про лимит/usage/исчерпание.
+_LIMIT_CONTEXT_RE = re.compile(
+    r'limit|usage|лимит|исчерпан|ограничен|попробуйте|превышен', re.I)
+_CONTEXT_WINDOW_CHARS = 120
+
+
+def has_limit_context(text: str, start: int, end: int,
+                      window: int = _CONTEXT_WINDOW_CHARS) -> bool:
+    """Есть ли рядом со срезом [start:end) слова про лимит/usage."""
+    lo = max(0, start - window)
+    hi = min(len(text), end + window)
+    return bool(_LIMIT_CONTEXT_RE.search(text[lo:hi]))
 
 
 def next_reset_occurrence(h: int, m: int) -> datetime.datetime:
@@ -899,23 +931,35 @@ def _find_limit_in_all_chats_impl(window, log_fn, max_chats=30) -> tuple:
                 break
 
 
-def parse_limit_text(text: str, now=None):
-    """Чистая функция (без UIA): текст окна → (hour, minute) сброса или None.
-    Сначала абсолютное время ('resets at HH:MM'), потом длительность
-    ('in X hours Y minutes') от переданного/текущего момента."""
+def parse_limit_text(text: str, now=None, require_context: bool = False):
+    """Чистая функция (без UIA): текст окна → (hour, minute) или None.
+    Сначала абсолютное время ('resets at HH:MM'), потом относительное
+    ('in X hours Y minutes') от переданного/текущего момента.
+
+    require_context=True — матч принимается только если рядом (±120 знаков)
+    есть слова про лимит/usage (#16): иначе старое сообщение в истории чата
+    «мы обсуждали resets at 3 PM» даёт фантомный сброс."""
     if not text:
         return None
 
+    now = now or datetime.datetime.now()
+
+    def _ok(s: int, e: int) -> bool:
+        return (not require_context) or has_limit_context(text, s, e)
+
     # Словесные формы без чисел ("in half an hour", "через полчаса")
     low = text.lower()
+    offset = len(text) - len(low)
     for pat, minutes in _LIMIT_DUR_SPECIALS_PRE:
-        if pat.search(low):
-            reset_dt = (now or datetime.datetime.now()) + datetime.timedelta(minutes=minutes)
+        m = pat.search(low)
+        if m and _ok(m.start() + offset, m.end() + offset):
+            reset_dt = now + datetime.timedelta(minutes=minutes)
             return (reset_dt.hour, reset_dt.minute)
 
     for pat in _LIMIT_ABS:
-        m = pat.search(text)
-        if m:
+        for m in pat.finditer(text):
+            if not _ok(m.start(), m.end()):
+                continue
             gs = m.groups()
             h = int(gs[0])
             mn = int(gs[1]) if len(gs) > 1 and gs[1] else 0
@@ -929,35 +973,42 @@ def parse_limit_text(text: str, now=None):
                 return (h, mn)
 
     for pat in _LIMIT_DUR:
-        m = pat.search(text)
-        if m:
+        for m in pat.finditer(text):
+            if not _ok(m.start(), m.end()):
+                continue
             groups = [int(x) for x in m.groups() if x is not None]
             if len(groups) == 2:
                 delta = datetime.timedelta(hours=groups[0], minutes=groups[1])
             elif len(groups) == 1:
-                # определяем — часы или минуты — по группе паттерна
+                # определяем - часы это или минуты - по группе паттерна
                 src = pat.pattern.lower()
                 delta = (datetime.timedelta(hours=groups[0])
                          if 'hour' in src or 'час' in src
                          else datetime.timedelta(minutes=groups[0]))
             else:
                 continue
-            reset_dt = (now or datetime.datetime.now()) + delta
+            reset_dt = now + delta
             return (reset_dt.hour, reset_dt.minute)
 
     return None
 
 
 def find_rate_limit_reset(window_ctrl, log_fn) -> tuple:
-    """Вернуть (hour, minute) времени сброса лимита или None."""
+    """Вернуть (hour, minute) времени сброса лимита или None (#16):
+    - сайдбар исключается по геометрии (старые названия чатов не анализируются),
+    - берутся только последние сообщения,
+    - матч обязан иметь контекст limit/usage/лимит рядом со временем."""
     if not HAS_UIA or window_ctrl is None:
         return None
-    text = _collect_window_text(window_ctrl)
-    result = parse_limit_text(text)
+    sidebar = _find_sidebar_container(window_ctrl)
+    exclude_rect = sidebar.BoundingRectangle if sidebar else None
+    text = _collect_window_text(window_ctrl, exclude_rect=exclude_rect,
+                                recent_items=60)
+    result = parse_limit_text(text, require_context=True)
     if not result:
         return None
     h, mn = result
-    log_fn(f'  Трекер: сброс лимита в {h:02d}:{mn:02d}', 'dim')
+    log_fn(f'  Трекер: найдено время сброса {h:02d}:{mn:02d}', 'dim')
     return result
 
 

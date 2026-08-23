@@ -62,6 +62,22 @@ python claude_continue_gui.py
 
 Или через `run.bat` (Windows, показывает консоль с ошибками) / `python claude_continue_gui.py` (macOS).
 
+### CLI / headless (без окна)
+
+```bash
+python claude_continue_gui.py --headless --at 05:00            # сработать в 05:00, дальше наблюдение
+python claude_continue_gui.py --headless --at 05:00 --once     # один цикл и выход
+python claude_continue_gui.py --headless --now                 # выполнить сразу и выйти
+python claude_continue_gui.py --headless --interval 600        # наблюдение каждые 10 минут
+```
+
+Полный список флагов: `--help`. Удобно для автозапуска и Планировщика задач.
+
+### Сборка exe
+
+Пуш тега `v*` собирает one-file `ClaudeAutoContinue.exe` через PyInstaller
+(GitHub Actions, `.github/workflows/release.yml`) и прикладывает его к релизу.
+
 ---
 
 ## Как пользоваться

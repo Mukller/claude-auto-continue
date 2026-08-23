@@ -354,11 +354,12 @@ I18N = {
 }
 
 _CURRENT_PROFILE = {'name': DEFAULT_PROFILE}
+_PROFILE_OVERRIDES = {}
 
 
 def _profile():
-    """Активный профиль приложений (см. engine.APP_PROFILES)."""
-    return _resolve_profile(_CURRENT_PROFILE['name'])
+    """Активный профиль + пользовательские overrides из настроек."""
+    return _resolve_profile(_CURRENT_PROFILE['name'], _PROFILE_OVERRIDES)
 
 
 def _acquire_single_instance() -> bool:
@@ -1717,6 +1718,9 @@ class App:
             pending = self._target.isoformat()
         d = {
             'lang': self.lang,
+            'profile': _CURRENT_PROFILE['name'],
+            'profile_overrides': getattr(self, '_cfg_profile_overrides',
+                                         {}),
             'theme': self._theme,
             'h': self._sg('sp_h', 5),
             'm': self._sg('sp_m', 0),
@@ -3454,6 +3458,14 @@ def run_headless(args) -> int:
         return 3
     if args.profile:
         _CURRENT_PROFILE['name'] = args.profile
+    try:
+        with open(SETTINGS_FILE, encoding='utf-8') as f:
+            ov = json.load(f).get('profile_overrides', {})
+        if isinstance(ov, dict):
+            _PROFILE_OVERRIDES.clear()
+            _PROFILE_OVERRIDES.update(ov)
+    except Exception:
+        pass
     log = _headless_logger(args.log_file)
     prof = _profile()
     log(f"Профиль приложения: {prof['label']}")

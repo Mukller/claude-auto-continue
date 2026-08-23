@@ -93,6 +93,21 @@ Experimental profiles are best-effort presets: each app's UIA tree was not
 verified element-by-element, and button labels depend on app version and UI
 language. If a profile misses — tweak `APP_PROFILES` in `engine.py` and send a PR.
 
+### Profile fine-tuning
+
+Any profile field can be overridden in `settings.json` without touching code:
+
+```json
+{
+  "profile": "cursor",
+  "profile_overrides": {
+    "cursor": { "button_labels": ["Try again", "Erneut"] }
+  }
+}
+```
+
+Only keys that already exist in the profile are applied; typos are ignored.
+
 ## Known limitations
 
 - If the app window stays covered because `bring_to_foreground` failed, a click may land elsewhere — the app logs a warning

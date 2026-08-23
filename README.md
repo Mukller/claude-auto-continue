@@ -94,6 +94,22 @@ python claude_continue_gui.py --list-profiles                        # спис�
 Если профиль промахивается — поправьте `APP_PROFILES` в `engine.py` под себя
 и пришлите PR.
 
+### Тонкая настройка профилей
+
+Любое поле профиля можно переопределить в `settings.json` без правки кода:
+
+```json
+{
+  "profile": "cursor",
+  "profile_overrides": {
+    "cursor": { "button_labels": ["Ещё раз", "Retry"] }
+  }
+}
+```
+
+Применяются только существующие ключи профиля (`button_labels`,
+`input_names`, `process`, `sidebar_chrome`, ...); опечатки игнорируются.
+
 ## Известные ограничения
 
 - Если окно приложения перекрыто и `bring_to_foreground` не сработал, клик может попасть не туда — программа пишет предупреждение в лог

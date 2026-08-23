@@ -117,7 +117,6 @@ I18N = {
         'app_not_found': '⚠ Claude Desktop не найден. Открой приложение и нажми «Найти».',
         'app_found_chats': '✓ {title}  —  чатов в сайдбаре: {n}',
         'app_found_no_sidebar': '✓ {title}  —  сайдбар не обнаружен, работаем с текущим видом',
-        'switch_first': 'Переключаться на первые',
         'chats_word': 'чатов',
         'more_chats': '  … ещё {n}',
         'per_chat': 'В каждом чате:',
@@ -239,7 +238,6 @@ I18N = {
         'app_not_found': '⚠ Claude Desktop not found. Open the app and click "Find".',
         'app_found_chats': '✓ {title}  —  chats in sidebar: {n}',
         'app_found_no_sidebar': '✓ {title}  —  sidebar not detected, using current view',
-        'switch_first': 'Switch to the first',
         'chats_word': 'chats',
         'more_chats': '  … {n} more',
         'per_chat': 'For each chat:',
@@ -422,7 +420,12 @@ def bring_to_foreground(hwnd, log_fn=lambda *a, **k: None) -> bool:
     try:
         user32 = ctypes.windll.user32
         SW_RESTORE = 9
-        user32.ShowWindow(hwnd, SW_RESTORE)
+        # SW_RESTORE безусловно разворачивает максимизированное окно в
+        # оконный режим; восстанавливаем только реально свёрнутое.
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+        else:
+            user32.ShowWindow(hwnd, 5)  # SW_SHOW
 
         fg_hwnd = user32.GetForegroundWindow()
         cur_tid = ctypes.windll.kernel32.GetCurrentThreadId()
@@ -766,11 +769,13 @@ _LIMIT_ABS = [
 _LIMIT_DUR = [
     # "in 3 hours 45 minutes" / "in 45 minutes" / "in 3 hours"
     re.compile(r'in\s+(\d+)\s+hours?\s+(?:and\s+)?(\d+)\s+minutes?', re.I),
-    re.compile(r'in\s+(\d+)\s+hours?(?!\s+and)', re.I),
+    # \b + lookahead не дают откатиться к «in 3 hour» на строке
+    # "in 3 hours and 45 minutes"
+    re.compile(r'in\s+(\d+)\s+hours?\b(?!\s+(?:and\s+)?\d)', re.I),
     re.compile(r'in\s+(\d+)\s+minutes?', re.I),
     # Russian
     re.compile(r'через\s+(\d+)\s+час[а-я]*\s+(?:и\s+)?(\d+)\s+минут', re.I),
-    re.compile(r'через\s+(\d+)\s+час[а-я]*(?!\s+и)', re.I),
+    re.compile(r'через\s+(\d+)\s+час[а-я]*\b(?!\s+(?:и\s+)?\d)', re.I),
     re.compile(r'через\s+(\d+)\s+минут', re.I),
 ]
 
@@ -995,7 +1000,9 @@ def run_cycle(n_or_indices, search_try_again: bool, auto_continue: bool, confide
 
     if chats:
         if isinstance(n_or_indices, list):
-            targets = [chats[i] for i in n_or_indices if i < len(chats)] or chats[:1]
+            # 0 <= i — иначе отрицательный индекс молча выбирает чат с конца
+            targets = [chats[i] for i in n_or_indices
+                       if 0 <= i < len(chats)] or chats[:1]
         else:
             targets = chats[:max(1, n_or_indices)]
         log_fn(f'  Чатов в сайдбаре: {len(chats)}, целевых: {len(targets)}', 'dim')
@@ -1217,17 +1224,13 @@ class FlatBtn(tk.Canvas):
         self._hovering = False
 
         outer = kw.pop('bg', None) or parent.cget('bg')
-        tmp = tk.Label(parent, text=text, font=font)
-        tmp.update_idletasks()
-        bw = tmp.winfo_reqwidth() + padx * 2
-        bh = tmp.winfo_reqheight() + pady * 2
-        tmp.destroy()
+        bw, bh = self._measure(parent, text, font, padx, pady)
 
         # NB: не называть self._w/self._h — эти имена зарезервированы
         # внутри tkinter.Misc (self._w хранит Tk-путь виджета) и будут
         # молча перезаписаны конструктором Canvas ниже.
         self._bw, self._bh = bw, bh
-        super().__init__(parent, width=bw, height=bh, bg=outer,
+        super().__init__(parent, width=self._bw, height=self._bh, bg=outer,
                          highlightthickness=0, cursor='hand2', **kw)
         self._draw(bg, fg)
 
@@ -1236,6 +1239,17 @@ class FlatBtn(tk.Canvas):
         self.bind('<Leave>', self._on_leave)
         self.bind('<ButtonPress-1>', self._on_press)
         self.bind('<ButtonRelease-1>', self._on_release)
+
+    @staticmethod
+    def _measure(parent, text, font, padx, pady) -> tuple:
+        """Требуемый размер кнопки под текст (нужен и при config(text=...):
+        новая надпись может быть длиннее/короче — иначе канвас обрезает её)."""
+        tmp = tk.Label(parent, text=text, font=font)
+        tmp.update_idletasks()
+        bw = tmp.winfo_reqwidth() + padx * 2
+        bh = tmp.winfo_reqheight() + pady * 2
+        tmp.destroy()
+        return bw, bh
 
     # ── отрисовка ───────────────────────────────────────────────────────────
 
@@ -1304,6 +1318,14 @@ class FlatBtn(tk.Canvas):
     def config(self, **kwargs):
         if 'text' in kwargs:
             self._text = kwargs.pop('text')
+            try:
+                bw, bh = self._measure(self.master, self._text,
+                                       self._font, self._padx, self._pady)
+                if (bw, bh) != (self._bw, self._bh):
+                    self._bw, self._bh = bw, bh
+                    self.configure(width=bw, height=bh)
+            except Exception:
+                pass
             self._draw(self._cur_bg, self._fg)
         if kwargs:
             super().config(**kwargs)
@@ -1479,6 +1501,18 @@ class App:
         # дерутся за мышь и кликают в разные места вперемешку.
         self._cycle_lock = threading.Lock()
         self._lt_scan_lock = threading.Lock()
+        # Трекер лимита: состояние живёт в __init__, а не в _build() —
+        # иначе смена темы пересоздаёт стоп-Event и старый воркер сканирует
+        # вечно («зомби»), а история/дедуп-контекст сбрасываются.
+        self._lt_reset_hm = None
+        self._lt_last_scan = None
+        self._lt_last_chat = None
+        self._lt_history = []
+        self._lt_prev_time = None
+        self._lt_next_scan_time = None
+        self._lt_auto_stop_evt = threading.Event()
+        self._lt_auto_stop_evt.set()
+        self._lt_worker_alive = False
         self._target   = None
         self._total_s  = 1.0
         self._chats_preview = []
@@ -1489,7 +1523,7 @@ class App:
         self._plan_running = False
         self._plan_stop_evt = threading.Event()
         self._plan_next_target = None
-        self._tick_active = True
+        self._tick_gen = 0   # поколение _tick-цикла: инкремент убивает старую цепочку after()
 
         self._stat_clicks = 0
         self._stat_ok = 0
@@ -1551,7 +1585,7 @@ class App:
         saved_chats = set(self._selected_chat_idx)
         self._theme = name
         self._save_settings()
-        self._tick_active = False          # остановить текущий цикл
+        self._tick_gen += 1               # старая цепочка _tick умрёт на следующем тике
         for w in self.root.winfo_children():
             w.destroy()
         self._apply_theme_vars()
@@ -1571,8 +1605,7 @@ class App:
             self.btn_plan_start.recolor(ERR, '#fff', '#ff6b6b')
             self.btn_plan_start.config(text=self.t('plan_stop_btn'))
             self._pc.set_outline(ACC)
-        self._tick_active = True           # запустить новый цикл
-        self._tick()
+        self._tick()                      # запустить новую цепочку
 
     # ── Настройки ───────────────────────────────────────────────────────────
 
@@ -1864,6 +1897,11 @@ class App:
     def _refresh_history(self):
         if not hasattr(self, 'history_list_frame'):
             return
+        try:
+            if not self.history_list_frame.winfo_exists():
+                return  # дерево виджетов пересобрано (смена темы)
+        except Exception:
+            return
         for w in self.history_list_frame.winfo_children():
             w.destroy()
         if not self._history:
@@ -1992,6 +2030,9 @@ class App:
         self._main_canvas.bind('<Configure>', lambda e: self._main_canvas.itemconfig(
             self._body_win, width=e.width))
 
+        # bind_all накапливает обработчики при каждой пересборке (смена темы) —
+        # сначала снимаем старый, иначе колесо скроллит всё быстрее с каждым разом.
+        self.root.unbind_all('<MouseWheel>')
         self.root.bind_all('<MouseWheel>', self._dispatch_scroll)
 
         # ── Кольцевой таймер внутри прокрутки ────────────────────────────────
@@ -2347,15 +2388,9 @@ class App:
         self.lbl_lt_hist_title.pack(anchor='w', pady=(8, 2))
         self.lbl_lt_history = tk.Label(lt, text='', bg=C1, fg=DIM, font=('Segoe UI', 7), anchor='w', justify='left')
         self.lbl_lt_history.pack(fill='x')
-
-        self._lt_reset_hm = None  # (hour, minute) последнего найденного сброса
-        self._lt_last_scan = None  # время последнего сканирования
-        self._lt_last_chat = None  # имя чата где найден лимит
-        self._lt_history = []  # история [time1, time2, time3, ...] последних 3 находок
-        self._lt_prev_time = None  # предыдущее найденное время для проверки дублей
-        self._lt_next_scan_time = None  # время следующего сканирования
-        self._lt_auto_stop_evt = threading.Event()
-        self._lt_auto_stop_evt.set()  # изначально не сканируем
+        # Состояние трекера (_lt_*) живёт в __init__ и не пересоздаётся здесь:
+        # пересоздание стоп-Event при смене темы оставляло старый воркер
+        # сканировать вечно («зомби»).
 
         # ── История срабатываний ──────────────────────────────────────────────
         tk.Frame(body, bg=BG, height=8).pack()
@@ -2481,6 +2516,13 @@ class App:
     def _update_scan(self, windows, chats):
         self._last_windows = windows
         self._chats_preview = chats
+        # Сканирование шло в фоне: пока оно работало, дерево виджетов могли
+        # пересобрать (смена темы) — обновлять нечего.
+        try:
+            if not self.lbl_app_status.winfo_exists():
+                return
+        except Exception:
+            return
         # Автовыбор первых 3 при первом обнаружении чатов
         if chats and not self._selected_chat_idx:
             self._selected_chat_idx = set(range(min(3, len(chats))))
@@ -2559,20 +2601,24 @@ class App:
 
     def _start_capture(self, key, on_refreshed):
         def done(bbox):
-            self.root.deiconify()
             if not bbox:
+                self.root.deiconify()
                 self._log(self.t('log_capture_cancelled'), 'dim')
                 return
             try:
+                # Сначала скриншот, потом deiconify: иначе развёрнутое главное
+                # окно успевает перекрыть область захвата и попадает в шаблон.
                 try:
                     img = ImageGrab.grab(bbox=bbox, all_screens=IS_WIN)
                 except TypeError:
                     img = ImageGrab.grab(bbox=bbox)  # старые Pillow без all_screens
+                self.root.deiconify()
                 img.save(TEMPLATES[key]['file'])
                 self._log(self.t('log_capture_saved', label=TEMPLATES[key]['label'],
                                  w=img.width, h=img.height), 'success')
                 on_refreshed()
             except Exception as e:
+                self.root.deiconify()
                 self._log(self.t('log_capture_error', e=e), 'error')
         RegionCapture(self.root, done, hint_text=self.t('capture_hint'))
 
@@ -2633,9 +2679,11 @@ class App:
 
     # ── Таймер ──────────────────────────────────────────────────────────────
 
-    def _tick(self):
-        if not self._tick_active:
-            return
+    def _tick(self, gen=None):
+        if gen is None:
+            gen = self._tick_gen
+        elif gen != self._tick_gen:
+            return  # цикл устарел (смена темы) — не перезапускаемся
         try:
             if self._running and self._target:
                 rem = (self._target - datetime.datetime.now()).total_seconds()
@@ -2658,7 +2706,7 @@ class App:
                 self._update_plan_status()
             except Exception:
                 pass
-        self.root.after(100, self._tick)
+        self.root.after(100, lambda: self._tick(gen))
 
     # ── Управление ──────────────────────────────────────────────────────────
 
@@ -2814,6 +2862,7 @@ class App:
 
     def _test_find(self):
         self._log(self.t('log_test'), 'accent')
+        cont = self._sgv('v_btn_cont', True)  # tk-переменные — только главный поток
         def run():
             windows = find_claude_windows(self._slog)
             if not windows:
@@ -2827,13 +2876,13 @@ class App:
             else:
                 self._badge(1, 'idle')
                 self._slog(self.t('log_btn_not_found'), 'dim')
-            if self.v_btn_cont.get():
+            if cont:
                 self._slog(self.t('log_cont_note'), 'dim')
         threading.Thread(target=run, daemon=True).start()
 
     def _lt_auto_disable_duplicate(self):
         """Дубль (то же время два скана подряд) — глушим автоскан в главном потоке."""
-        self.lbl_lt_result.config(text=self.t('limit_tracker_duplicate'), fg=WARN)
+        self._lt_set_result(self.t('limit_tracker_duplicate'), WARN)
         self.v_lt_auto.set(False)
         self._lt_toggle_auto()
         self._log(self.t('limit_tracker_duplicate'), 'warn')
@@ -2843,8 +2892,8 @@ class App:
             # Кнопка и авто-воркер могут запустить два скана разом —
             # тогда они кликают по сайдбару вперемешку.
             if not self._lt_scan_lock.acquire(blocking=False):
-                self.root.after(0, lambda: self.lbl_lt_result.config(
-                    text=self.t('limit_tracker_scanning'), fg=DIM))
+                self.root.after(0, lambda: self._lt_set_result(
+                    self.t('limit_tracker_scanning'), DIM))
                 return
             try:
                 self._lt_scan_impl()
@@ -2855,11 +2904,12 @@ class App:
         threading.Thread(target=run, daemon=True).start()
 
     def _lt_scan_impl(self):
-        self.root.after(0, lambda: self.lbl_lt_result.config(text=self.t('limit_tracker_scanning'), fg=DIM))
+        self.root.after(0, lambda: self._lt_set_result(
+            self.t('limit_tracker_scanning'), DIM))
         windows = find_claude_windows(self._slog)
         if not windows:
-            self.root.after(0, lambda: self.lbl_lt_result.config(
-                text=self.t('log_no_app'), fg=ERR))
+            self.root.after(0, lambda: self._lt_set_result(
+                self.t('log_no_app'), ERR))
             return
         result = find_limit_in_all_chats(windows[0], self._slog)
         if result:
@@ -2881,11 +2931,11 @@ class App:
 
             self._lt_prev_time = time_str
             txt = self.t('limit_tracker_found', time=time_str)
-            self.root.after(0, lambda: self.lbl_lt_result.config(text=txt, fg=ACC))
+            self.root.after(0, lambda: self._lt_set_result(txt, ACC))
             self.root.after(0, self._lt_update_history_display)
             self.root.after(0, self._lt_add_to_plan)
             # Уведомление
-            if HAS_NOTIF and self._cfg.get('notif', True):
+            if HAS_NOTIF and self._sgv('v_notif', True):
                 try:
                     title = self.t('limit_tracker_notif_title', time=time_str)
                     msg = self.t('limit_tracker_found_in', chat=chat_name[:40])
@@ -2895,8 +2945,8 @@ class App:
         else:
             self._lt_reset_hm = None
             self._lt_last_scan = datetime.datetime.now()
-            self.root.after(0, lambda: self.lbl_lt_result.config(
-                text=self.t('limit_tracker_not_found'), fg=DIM))
+            self.root.after(0, lambda: self._lt_set_result(
+                self.t('limit_tracker_not_found'), DIM))
             self.root.after(0, self._lt_update_history_display)
 
     def _lt_add_to_plan(self):
@@ -2914,23 +2964,48 @@ class App:
             self._update_plan_status()
             self._save_settings()
         txt = self.t('limit_tracker_added', time=f'{h:02d}:{m:02d}')
-        self.lbl_lt_result.config(text=txt, fg=SUC)
+        self._lt_set_result(txt, SUC)
 
     def _lt_update_history_display(self):
         """Обновить отображение истории лимитов."""
+        try:
+            if not self.lbl_lt_history.winfo_exists():
+                return
+        except Exception:
+            return
         if self._lt_history:
             txt = '  ' + ', '.join(self._lt_history)
             self.lbl_lt_history.config(text=txt)
         else:
             self.lbl_lt_history.config(text='')
 
+    def _lt_set_result(self, text, fg):
+        """Обновить lbl_lt_result, если виджет жив (смена темы пересобирает дерево)."""
+        try:
+            if self.lbl_lt_result.winfo_exists():
+                self.lbl_lt_result.config(text=text, fg=fg)
+        except Exception:
+            pass
+
+    def _lt_set_status(self, text):
+        try:
+            if self.lbl_lt_status.winfo_exists():
+                self.lbl_lt_status.config(text=text)
+        except Exception:
+            pass
+
     def _lt_toggle_auto(self):
         """Включить/выключить автосканирование."""
         if self.v_lt_auto.get():
+            # Event один на всё время жизни приложения (создан в __init__):
+            # смена темы его не пересоздаёт, поэтому чекбокс всегда управляет
+            # именно работающим воркером, а не создаёт параллельный сканер.
             self._lt_auto_stop_evt.clear()
             self._lt_next_scan_time = datetime.datetime.now()
             self._save_settings()
-            threading.Thread(target=self._lt_auto_worker, daemon=True).start()
+            if not self._lt_worker_alive:
+                self._lt_worker_alive = True
+                threading.Thread(target=self._lt_auto_worker, daemon=True).start()
             self._slog(self.t('log_lt_auto_on'), 'dim')
         else:
             self._lt_auto_stop_evt.set()
@@ -2940,26 +3015,32 @@ class App:
 
     def _lt_auto_worker(self):
         """Фоновый worker — сканирует лимит каждый интервал (15-120 мин)."""
-        while not self._lt_auto_stop_evt.is_set():
-            interval = self.sp_lt_interval.get() * 60  # в секунды
-            self._lt_next_scan_time = datetime.datetime.now() + datetime.timedelta(seconds=interval)
+        try:
+            while not self._lt_auto_stop_evt.is_set():
+                interval = self.sp_lt_interval.get() * 60  # в секунды
+                self._lt_next_scan_time = datetime.datetime.now() + datetime.timedelta(seconds=interval)
 
-            # Цикл ожидания с обновлением таймера
-            for _ in range(interval):
-                if self._lt_auto_stop_evt.is_set():
-                    return
-                # Каждую секунду обновляем время до следующего сканирования
-                if _ % 10 == 0:  # каждые 10 секунд
-                    if self._lt_next_scan_time:
-                        left = (self._lt_next_scan_time - datetime.datetime.now()).total_seconds()
-                        if left > 0:
-                            min_left = int(left) // 60
-                            self.root.after(0, lambda m=min_left: self.lbl_lt_status.config(
-                                text=self.t('limit_tracker_next', min=m)))
-                self._lt_auto_stop_evt.wait(1)
+                # Цикл ожидания с обновлением таймера
+                for sec in range(interval):
+                    if self._lt_auto_stop_evt.is_set():
+                        return
+                    # Каждые 10 секунд обновляем время до следующего сканирования
+                    if sec % 10 == 0:  # каждые 10 секунд
+                        if self._lt_next_scan_time:
+                            left = (self._lt_next_scan_time - datetime.datetime.now()).total_seconds()
+                            if left > 0:
+                                min_left = int(left) // 60
+                                try:
+                                    self.root.after(0, lambda m=min_left: self._lt_set_status(
+                                        self.t('limit_tracker_next', min=m)))
+                                except RuntimeError:
+                                    return  # приложение закрывается
+                    self._lt_auto_stop_evt.wait(1)
 
-            if not self._lt_auto_stop_evt.is_set():
-                self._lt_scan()
+                if not self._lt_auto_stop_evt.is_set():
+                    self._lt_scan()
+        finally:
+            self._lt_worker_alive = False
 
     # ── План запусков (несколько времён/циклов) ──────────────────────────────
 

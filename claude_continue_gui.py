@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code Auto-Continue — v3.8
+"""Claude Code Auto-Continue — v3.9
 Windows: автопоиск кнопки через UI Automation + переключение чатов в сайдбаре.
 macOS:   поиск окна через pgrep/osascript, поиск кнопки по скриншоту-шаблону.
 """
@@ -37,9 +37,12 @@ else:
 
 try:
     import pyautogui
-    pyautogui.FAILSAFE = False
 except ImportError:
     pyautogui = None
+
+# Аварийный стоп: резкий рывок мыши в угол экрана прерывает цикл.
+# Раньше FAILSAFE отключали совсем — зависший клик нельзя было остановить.
+_FAILSAFE_EXC = pyautogui.FailSafeException if pyautogui else RuntimeError
 
 try:
     from PIL import Image, ImageGrab, ImageTk
@@ -210,6 +213,14 @@ I18N = {
         'limit_tracker_duplicate': '⚠ Дубль! Лимит не сбросился?',
         'limit_tracker_notif_title': 'Лимит сбросится в {time}',
         'limit_tracker_found_in': 'Найдено в: {chat}',
+        'notif_label': '🔔 Уведомления',
+        'lt_interval_label': 'Интервал:',
+        'minutes_short': 'мин',
+        'lt_history_title': 'История сбросов:',
+        'log_lt_auto_on': 'Автосканирование лимита включено',
+        'log_lt_auto_off': 'Автосканирование лимита выключено',
+        'log_cycle_busy': '⚠ Цикл уже выполняется — пропускаю',
+        'log_failsafe': '⏹ Аварийный стоп: курсор в углу экрана (FAILSAFE)',
     },
     'en': {
         'missing': '⚠ Missing: {deps}\npip install {installs}',
@@ -324,6 +335,14 @@ I18N = {
         'limit_tracker_duplicate': '⚠ Duplicate! Limit didn\'t reset?',
         'limit_tracker_notif_title': 'Limit resets at {time}',
         'limit_tracker_found_in': 'Found in: {chat}',
+        'notif_label': '🔔 Notifications',
+        'lt_interval_label': 'Interval:',
+        'minutes_short': 'min',
+        'lt_history_title': 'Reset history:',
+        'log_lt_auto_on': 'Auto limit scanning enabled',
+        'log_lt_auto_off': 'Auto limit scanning disabled',
+        'log_cycle_busy': '⚠ A cycle is already running — skipping',
+        'log_failsafe': '⏹ Emergency stop: cursor in screen corner (FAILSAFE)',
     },
 }
 
@@ -463,7 +482,10 @@ SIDEBAR_CHROME = {
     'dispatch', 'dispatch beta', 'beta', 'customize', 'more navigation items',
     'pinned', 'recents', 'filter', 'home', 'new',
 }
-SIDEBAR_CHROME_PREFIXES = ('more options for ', 'show ', 'relaunch to update')
+# 'show ' как префикс вырезал настоящие чаты вида "Show me how to…" —
+# оставляем только конкретные служебные пункты.
+SIDEBAR_CHROME_PREFIXES = ('more options for ', 'show more', 'show less',
+                           'show all', 'relaunch to update')
 
 
 def _is_real_chat_name(name: str) -> bool:
@@ -647,6 +669,8 @@ def click_rect(rect, log_fn, press_enter_after=False) -> bool:
             pyautogui.press('enter')
             log_fn('  → Enter отправлен', 'dim')
         return True
+    except _FAILSAFE_EXC:
+        raise
     except Exception as e:
         log_fn(f'  Клик не удался: {e}', 'error')
         return False
@@ -692,6 +716,8 @@ def click_box(box, log_fn, press_enter_after=False) -> bool:
             pyautogui.press('enter')
             log_fn('  → Enter отправлен', 'dim')
         return True
+    except _FAILSAFE_EXC:
+        raise
     except Exception as e:
         log_fn(f'  Клик не удался: {e}', 'error')
         return False
@@ -776,9 +802,10 @@ def _collect_window_text(root_ctrl, max_nodes=50000, time_budget=15.0) -> str:
     return ' '.join(parts)
 
 
-def find_limit_in_all_chats(window, log_fn) -> tuple:
-    """Сканирует ВСЕ чаты в сайдбаре и ищет сообщение о сбросе лимита.
-    Возвращает (h, m, chat_name) или None."""
+def find_limit_in_all_chats(window, log_fn, max_chats=30) -> tuple:
+    """Сканирует чаты в сайдбаре и ищет сообщение о сбросе лимита.
+    Возвращает (h, m, chat_name) или None. После скана возвращает окно
+    на первый чат — иначе пользователь остаётся в последнем просмотренном."""
     if not HAS_UIA or window is None:
         return None
     window_ctrl = window.get('ctrl')
@@ -790,21 +817,30 @@ def find_limit_in_all_chats(window, log_fn) -> tuple:
         log_fn('  Чаты не найдены в сайдбаре', 'dim')
         return None
 
-    log_fn(f'  Сканирую {len(chats)} чатов…', 'dim')
-    for i, chat in enumerate(chats):
-        log_fn(f'    Чат {i+1}/{len(chats)}: {chat["name"][:40]}…', 'dim')
-        try:
-            click_rect(chat['rect'], log_fn)
-            time.sleep(1.5)  # дать чату загрузиться
-            result = find_rate_limit_reset(window_ctrl, log_fn)
-            if result:
-                h, m = result
-                log_fn(f'  ✓ Найден сброс в {h:02d}:{m:02d} (чат: {chat["name"][:50]})', 'success')
-                return (h, m, chat["name"])
-        except Exception as e:
-            log_fn(f'    Ошибка при сканировании: {e}', 'dim')
-            continue
-    return None
+    if len(chats) > max_chats:
+        log_fn(f'  Чатов {len(chats)} — сканирую первые {max_chats}', 'dim')
+        chats = chats[:max_chats]
+
+    first_rect = chats[0]['rect']
+    try:
+        log_fn(f'  Сканирую {len(chats)} чатов…', 'dim')
+        for i, chat in enumerate(chats):
+            log_fn(f'    Чат {i+1}/{len(chats)}: {chat["name"][:40]}…', 'dim')
+            try:
+                click_rect(chat['rect'], log_fn)
+                time.sleep(1.5)  # дать чату загрузиться
+                result = find_rate_limit_reset(window_ctrl, log_fn)
+                if result:
+                    h, m = result
+                    log_fn(f'  ✓ Найден сброс в {h:02d}:{m:02d} (чат: {chat["name"][:50]})', 'success')
+                    return (h, m, chat["name"])
+            except Exception as e:
+                log_fn(f'    Ошибка при сканировании: {e}', 'dim')
+                continue
+        return None
+    finally:
+        time.sleep(0.4)
+        click_rect(first_rect, log_fn)
 
 
 def find_rate_limit_reset(window_ctrl, log_fn) -> tuple:
@@ -944,7 +980,18 @@ class RegionCapture:
         self.rect_id = None
 
         self.top = tk.Toplevel(root)
-        self.top.attributes('-fullscreen', True)
+        if IS_WIN:
+            # Виртуальный рабочий стол (все мониторы): -fullscreen покрывает
+            # только основной, а кнопка может жить на втором экране.
+            ux = ctypes.windll.user32.GetSystemMetrics(76)
+            uy = ctypes.windll.user32.GetSystemMetrics(77)
+            uw = ctypes.windll.user32.GetSystemMetrics(78)
+            uh = ctypes.windll.user32.GetSystemMetrics(79)
+            self.top.overrideredirect(True)
+            self.top.geometry(f'{uw}x{uh}+{ux}+{uy}')
+            self.top.lift()
+        else:
+            self.top.attributes('-fullscreen', True)
         self.top.attributes('-alpha', 0.30)
         self.top.attributes('-topmost', True)
         self.top.configure(bg='gray12')
@@ -1226,8 +1273,6 @@ class FlatBtn(tk.Canvas):
 
 
 class Badge(tk.Frame):
-    COLORS = {'idle': DIM, 'ok': SUC, 'fail': ERR, 'trying': WARN}
-
     def __init__(self, parent, name, **kw):
         super().__init__(parent, bg=C1, padx=10, pady=5,
                          highlightthickness=1, highlightbackground=BRD, **kw)
@@ -1237,7 +1282,10 @@ class Badge(tk.Frame):
         self._name_lbl.pack(side='left', padx=(4, 0))
 
     def set(self, state):
-        self._dot.config(fg=self.COLORS.get(state, DIM))
+        # Цвета берём из актуальных глобалов: словарь на уровне класса
+        # «замораживал» тёмную палитру навсегда, даже в светлой теме.
+        color = {'idle': DIM, 'ok': SUC, 'fail': ERR, 'trying': WARN}.get(state, DIM)
+        self._dot.config(fg=color)
 
     def set_name(self, name):
         self._name_lbl.config(text=name)
@@ -1346,10 +1394,11 @@ class TemplateRow(tk.Frame):
         if os.path.isfile(path) and Image:
             try:
                 img = Image.open(path)
+                w0, h0 = img.size
                 img.thumbnail((48, 28))
                 self._photo = ImageTk.PhotoImage(img)
                 self.thumb.config(image=self._photo, width=48, height=28)
-                self.lbl_status.config(text=f'{img.width}×{img.height} px  ✓', fg=SUC)
+                self.lbl_status.config(text=f'{w0}×{h0} px  ✓', fg=SUC)
             except Exception:
                 self.lbl_status.config(text=self.app.t('tpl_read_error'), fg=ERR)
         else:
@@ -1382,6 +1431,10 @@ class App:
         self._theme = 'dark'
         self._running  = False
         self._stop_evt = threading.Event()
+        # Один run_cycle одновременно: «Сейчас» + воркер таймера/плана иначе
+        # дерутся за мышь и кликают в разные места вперемешку.
+        self._cycle_lock = threading.Lock()
+        self._lt_scan_lock = threading.Lock()
         self._target   = None
         self._total_s  = 1.0
         self._chats_preview = []
@@ -1461,6 +1514,19 @@ class App:
         self._build()
         self._selected_chat_idx = saved_chats
         self._refresh_chat_list()
+        # После пересборки вернуть визуальное состояние активных режимов —
+        # иначе при запущенном таймере кнопка снова выглядела как СТАРТ.
+        if self._running:
+            self.main_btn.recolor(ERR, '#fff', '#ff6b6b')
+            self.main_btn.config(text=self.t('stop_btn'))
+            self._tc.set_outline(ACC)
+            if self._target:
+                self.lbl_hint.config(
+                    text=f'→ {self._target.strftime("%d.%m.%Y  %H:%M")}')
+        if self._plan_running:
+            self.btn_plan_start.recolor(ERR, '#fff', '#ff6b6b')
+            self.btn_plan_start.config(text=self.t('plan_stop_btn'))
+            self._pc.set_outline(ACC)
         self._tick_active = True           # запустить новый цикл
         self._tick()
 
@@ -1473,10 +1539,21 @@ class App:
         except Exception:
             d = {}
         self._cfg = d
-        self.lang = d.get('lang', 'ru')
-        self._theme = d.get('theme', 'dark')
-        self._plan = [tuple(x) for x in d.get('plan', [])]
-        self._history = d.get('history', [])[-10:]
+        lang = d.get('lang', 'ru')
+        self.lang = lang if lang in I18N else 'ru'
+        theme = d.get('theme', 'dark')
+        self._theme = theme if theme in THEMES else 'dark'
+        plan = []
+        for x in d.get('plan', []):
+            try:
+                h, m = int(x[0]), int(x[1])
+                if 0 <= h <= 23 and 0 <= m <= 59:
+                    plan.append((h, m))
+            except Exception:
+                continue
+        self._plan = sorted(set(plan))
+        self._history = [e for e in d.get('history', [])[-10:]
+                         if isinstance(e, dict) and isinstance(e.get('ok'), int)]
         # tray_minimize доступна только после __init__ tk.BooleanVar; обновляем позже
         self._cfg_tray_minimize = d.get('tray_minimize', True)
 
@@ -1490,7 +1567,7 @@ class App:
             'h': self._sg('sp_h', 5),
             'm': self._sg('sp_m', 0),
             'watch': self._sgv('v_watch', False),
-            'interval': self._sgv('v_interval', '30'),
+            'interval': str(self._watch_interval()),
             'btn_try': self._sgv('v_btn_try', True),
             'btn_cont': self._sgv('v_btn_cont', True),
             'conf': self._sgv('v_conf', 0.82),
@@ -1519,6 +1596,15 @@ class App:
     def _sgv(self, attr, default):
         try: return getattr(self, attr).get()
         except Exception: return default
+
+    def _watch_interval(self) -> int:
+        """Интервал наблюдения с валидацией: 'abc' или 99999 в Spinbox
+        раньше роняли воркер на int() — поток умирал молча, UI зависал в СТОП."""
+        try:
+            iv = int(float(str(self.v_interval.get()).strip()))
+        except Exception:
+            iv = 30
+        return max(5, min(600, iv))
 
     def _try_restore_pending(self):
         """Если при последнем запуске таймер был активен и цель ещё в будущем — восстановить."""
@@ -1602,10 +1688,12 @@ class App:
 
     # ── Уведомления Windows ────────────────────────────────────────────────
 
-    def _notify(self, ok: int):
-        if not HAS_NOTIF:
-            return
-        if not hasattr(self, 'v_notif') or not self.v_notif.get():
+    def _notify(self, ok: int, enabled=None):
+        # enabled читается в главном потоке ДО запуска воркера —
+        # обращение к tk-переменным из чужого потока небезопасно.
+        if enabled is None:
+            enabled = hasattr(self, 'v_notif') and self.v_notif.get()
+        if not HAS_NOTIF or not enabled:
             return
         try:
             title = self.t('notif_title')
@@ -1770,12 +1858,13 @@ class App:
                            cursor='hand2').pack(anchor='w')
         self.v_notif = tk.BooleanVar(value=self._cfg.get('notif', True))
         if HAS_NOTIF:
-            tk.Checkbutton(langleft,
-                           text=('🔔 Уведомления' if self.lang == 'ru' else '🔔 Notifications'),
+            self.chk_notif = tk.Checkbutton(langleft,
+                           text=self.t('notif_label'),
                            variable=self.v_notif,
                            bg=BG, fg=DIM, selectcolor=C2, activebackground=BG,
                            activeforeground=TXT, font=('Segoe UI', 8),
-                           cursor='hand2').pack(anchor='w')
+                           cursor='hand2')
+            self.chk_notif.pack(anchor='w')
 
         langwrap = tk.Frame(langbar, bg=BG)
         langwrap.pack(side='right', padx=18)
@@ -2099,10 +2188,13 @@ class App:
         self.v_retry_stuck = tk.BooleanVar(value=self._cfg.get('retry_stuck', False))
         row_retry = tk.Frame(wc, bg=C1)
         row_retry.pack(fill='x', pady=(3, 0))
-        tk.Checkbutton(row_retry, text=self.t('retry_stuck_label'), variable=self.v_retry_stuck,
-                       bg=C1, fg=DIM, selectcolor=C2, activebackground=C1,
-                       activeforeground=TXT, font=('Segoe UI', 9), cursor='hand2'
-                       ).pack(side='left')
+        self.chk_retry_stuck = tk.Checkbutton(row_retry, text=self.t('retry_stuck_label'),
+                                              variable=self.v_retry_stuck,
+                                              bg=C1, fg=DIM, selectcolor=C2,
+                                              activebackground=C1,
+                                              activeforeground=TXT,
+                                              font=('Segoe UI', 9), cursor='hand2')
+        self.chk_retry_stuck.pack(side='left')
 
         # ── Резервный вариант: шаблоны ───────────────────────────────────────
         tk.Frame(body, bg=BG, height=10).pack()
@@ -2185,14 +2277,21 @@ class App:
         # Интервал сканирования (15, 30, 45, 60 минут)
         lt_interval_row = tk.Frame(lt, bg=C1)
         lt_interval_row.pack(fill='x', pady=(8, 0))
-        tk.Label(lt_interval_row, text='Интервал:', bg=C1, fg=DIM, font=('Segoe UI', 8)).pack(side='left')
+        self.lbl_lt_interval = tk.Label(lt_interval_row,
+                                        text=self.t('lt_interval_label'),
+                                        bg=C1, fg=DIM, font=('Segoe UI', 8))
+        self.lbl_lt_interval.pack(side='left')
         self.sp_lt_interval = Spinner(lt_interval_row, lo=15, hi=120,
                                       val=self._cfg.get('lt_interval', 30), big=False)
         self.sp_lt_interval.pack(side='left', padx=(6, 0))
-        tk.Label(lt_interval_row, text='мин', bg=C1, fg=DIM, font=('Segoe UI', 8)).pack(side='left', padx=(4, 0))
+        self.lbl_lt_minutes = tk.Label(lt_interval_row, text=self.t('minutes_short'),
+                                       bg=C1, fg=DIM, font=('Segoe UI', 8))
+        self.lbl_lt_minutes.pack(side='left', padx=(4, 0))
 
         # История лимитов
-        tk.Label(lt, text='История сбросов:', bg=C1, fg=DIM, font=('Segoe UI', 8, 'bold')).pack(anchor='w', pady=(8, 2))
+        self.lbl_lt_hist_title = tk.Label(lt, text=self.t('lt_history_title'),
+                                          bg=C1, fg=DIM, font=('Segoe UI', 8, 'bold'))
+        self.lbl_lt_hist_title.pack(anchor='w', pady=(8, 2))
         self.lbl_lt_history = tk.Label(lt, text='', bg=C1, fg=DIM, font=('Segoe UI', 7), anchor='w', justify='left')
         self.lbl_lt_history.pack(fill='x')
 
@@ -2255,6 +2354,12 @@ class App:
         self.btn_lt_scan.config(text=self.t('limit_tracker_btn'))
         self.btn_lt_add.config(text=self.t('limit_tracker_add_btn'))
         self.chk_lt_auto.config(text=self.t('limit_tracker_auto'))
+        self.chk_retry_stuck.config(text=self.t('retry_stuck_label'))
+        if hasattr(self, 'chk_notif'):
+            self.chk_notif.config(text=self.t('notif_label'))
+        self.lbl_lt_interval.config(text=self.t('lt_interval_label'))
+        self.lbl_lt_minutes.config(text=self.t('minutes_short'))
+        self.lbl_lt_hist_title.config(text=self.t('lt_history_title'))
         self._lt_update_history_display()
         self.lbl_accuracy.config(text=self.t('accuracy'))
         self.lbl_log_title.config(text=self.t('log_title'))
@@ -2277,10 +2382,16 @@ class App:
     # ── Сворачиваемый / прокручиваемый список чатов ──────────────────────────
 
     def _dispatch_scroll(self, event):
+        if not event.delta:
+            return
+        # Windows: delta кратен 120; macOS: сырые малые значения без масштаба
+        step = int(-event.delta / 120) if IS_WIN else -int(event.delta)
+        if not step:
+            return
         w = event.widget
         while w is not None:
             if w is getattr(self, '_chat_canvas', None):
-                self._chat_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+                self._chat_canvas.yview_scroll(step, 'units')
                 return
             if isinstance(w, tk.Text):
                 return  # text widget handles it natively
@@ -2289,7 +2400,7 @@ class App:
             except AttributeError:
                 break
         if hasattr(self, '_main_canvas'):
-            self._main_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+            self._main_canvas.yview_scroll(step, 'units')
 
     def _toggle_chat_list(self):
         self._chat_collapsed = not self._chat_collapsed
@@ -2399,7 +2510,10 @@ class App:
                 self._log(self.t('log_capture_cancelled'), 'dim')
                 return
             try:
-                img = ImageGrab.grab(bbox=bbox)
+                try:
+                    img = ImageGrab.grab(bbox=bbox, all_screens=IS_WIN)
+                except TypeError:
+                    img = ImageGrab.grab(bbox=bbox)  # старые Pillow без all_screens
                 img.save(TEMPLATES[key]['file'])
                 self._log(self.t('log_capture_saved', label=TEMPLATES[key]['label'],
                                  w=img.width, h=img.height), 'success')
@@ -2477,6 +2591,14 @@ class App:
                 self.ring.draw(0, '--:--:--', self.t('ring_idle'), DIM)
         except Exception:
             pass
+        # Обратный отсчёт плана обновлять раз в секунду, а не один раз при старте
+        now_s = int(time.time())
+        if self._plan_running and now_s != getattr(self, '_plan_status_ts', -1):
+            self._plan_status_ts = now_s
+            try:
+                self._update_plan_status()
+            except Exception:
+                pass
         self.root.after(100, self._tick)
 
     # ── Управление ──────────────────────────────────────────────────────────
@@ -2498,8 +2620,27 @@ class App:
             self._log(self.t('log_stopped'), 'dim')
             for b in self.badges: b.set('idle')
             self._tc.set_outline(BRD)
+            # pending_iso в settings.json должен обнулиться сразу:
+            # если приложение упадёт после STOP, при следующем запуске
+            # не должен «воскресать» остановленный таймер.
+            self._save_settings()
         else:
             self._start()
+
+    def _do_cycle(self, indices, try_again, cont, conf):
+        """Единственная точка запуска run_cycle: не даём двум потокам
+        (таймер, план, кнопка «Сейчас») одновременно управлять мышью,
+        и ловим аварийный стоп по FAILSAFE."""
+        if not self._cycle_lock.acquire(blocking=False):
+            self._slog(self.t('log_cycle_busy'), 'warn')
+            return 0
+        try:
+            return run_cycle(indices, try_again, cont, conf, self._slog, self._badge)
+        except _FAILSAFE_EXC:
+            self._slog(self.t('log_failsafe'), 'warn')
+            return 0
+        finally:
+            self._cycle_lock.release()
 
     def _start(self):
         if IS_WIN and not HAS_UIA:
@@ -2512,6 +2653,18 @@ class App:
         self._running = True
         self._target  = self._get_target()
         self._total_s = max(1.0, (self._target - datetime.datetime.now()).total_seconds())
+        # Все опции фиксируем здесь, в главном потоке: воркер не трогает
+        # tk-переменные и не зависит от правок чекбоксов во время ожидания.
+        self._start_opts = {
+            'indices': sorted(self._selected_chat_idx) or [0],
+            'try_again': bool(self.v_btn_try.get()),
+            'cont': bool(self.v_btn_cont.get()),
+            'conf': float(self.v_conf.get()),
+            'watch': bool(self.v_watch.get()),
+            'interval': self._watch_interval(),
+            'retry_stuck': bool(self.v_retry_stuck.get()),
+            'notify': bool(self.v_notif.get()),
+        }
         self.main_btn.recolor(ERR, '#fff', '#ff6b6b')
         self.main_btn.config(text=self.t('stop_btn'))
         self.lbl_hint.config(text=f'→ {self._target.strftime("%d.%m.%Y  %H:%M")}')
@@ -2521,6 +2674,8 @@ class App:
         threading.Thread(target=self._worker, daemon=True).start()
 
     def _worker(self):
+        o = getattr(self, '_start_opts', {})
+        indices = o.get('indices') or [0]
         while not self._stop_evt.is_set():
             rem = (self._target - datetime.datetime.now()).total_seconds()
             if rem <= 0: break
@@ -2528,21 +2683,21 @@ class App:
         if self._stop_evt.is_set(): return
 
         self._slog(self.t('log_time_search'), 'warn')
-        indices = sorted(self._selected_chat_idx) or [0]
-        try_again, auto_cont = self.v_btn_try.get(), self.v_btn_cont.get()
-        conf = self.v_conf.get()
+        try_again = o.get('try_again', True)
+        auto_cont = o.get('cont', True)
+        conf = o.get('conf', 0.82)
 
         ok = 0
         for attempt in range(1, 4):
             if self._stop_evt.is_set(): return
             self._slog(self.t('log_attempt', n=attempt), 'dim')
-            ok = run_cycle(indices, try_again, auto_cont, conf, self._slog, self._badge)
+            ok = self._do_cycle(indices, try_again, auto_cont, conf)
             if ok: break
             if attempt < 3: self._stop_evt.wait(5)
 
         self._stat_click(ok)
         self._add_history(ok)
-        self._notify(ok)
+        self._notify(ok, o.get('notify', False))
         if ok:
             self.root.after(0, lambda c=ok: self.ring.draw(100, '✓', self.t('ring_done', n=c), SUC))
             self._slog(self.t('log_success', n=ok), 'success')
@@ -2551,16 +2706,15 @@ class App:
             self._slog(self.t('log_fail'), 'error')
 
         # ── 15-мин повтор если нет ответа ───────────────────────────────────
-        if ok and hasattr(self, 'v_retry_stuck') and self.v_retry_stuck.get():
+        if ok and o.get('retry_stuck'):
             if not self._stop_evt.is_set():
                 self._slog(self.t('log_retry_wait'), 'dim')
                 self._stop_evt.wait(15 * 60)
             if not self._stop_evt.is_set():
                 self._slog(self.t('log_retry_check'), 'warn')
-                retry_indices = sorted(self._selected_chat_idx) or [0]
-                retry_ok = run_cycle(retry_indices, self.v_btn_try.get(),
-                                     False,  # не нажимаем Enter при retry
-                                     self.v_conf.get(), self._slog, self._badge)
+                retry_ok = self._do_cycle(indices, try_again,
+                                          False,  # не нажимаем Enter при retry
+                                          conf)
                 if retry_ok:
                     self._stat_click(retry_ok)
                     self._add_history(retry_ok)
@@ -2568,15 +2722,13 @@ class App:
                 else:
                     self._slog(self.t('log_retry_skip'), 'dim')
 
-        if self.v_watch.get() and not self._stop_evt.is_set():
-            iv = int(self.v_interval.get() or 30)
+        if o.get('watch') and not self._stop_evt.is_set():
+            iv = o.get('interval', 30)
             self._slog(self.t('log_watch', n=iv), 'dim')
             while not self._stop_evt.is_set():
                 self._stop_evt.wait(iv)
                 if self._stop_evt.is_set(): break
-                watch_ok = run_cycle(sorted(self._selected_chat_idx) or [0],
-                                     self.v_btn_try.get(), self.v_btn_cont.get(),
-                                     self.v_conf.get(), self._slog, self._badge)
+                watch_ok = self._do_cycle(indices, try_again, auto_cont, conf)
                 self._stat_click(watch_ok)
                 self._add_history(watch_ok)
 
@@ -2593,11 +2745,12 @@ class App:
         self._log(self.t('log_now'), 'accent')
         indices = sorted(self._selected_chat_idx) or [0]
         try_again, auto_cont, conf = self.v_btn_try.get(), self.v_btn_cont.get(), self.v_conf.get()
+        notify = bool(self.v_notif.get())
         def _run():
-            ok = run_cycle(indices, try_again, auto_cont, conf, self._slog, self._badge)
+            ok = self._do_cycle(indices, try_again, auto_cont, conf)
             self._stat_click(ok)
             self._add_history(ok)
-            self._notify(ok)
+            self._notify(ok, notify)
         threading.Thread(target=_run, daemon=True).start()
 
     def _test_find(self):
@@ -2619,56 +2772,71 @@ class App:
                 self._slog(self.t('log_cont_note'), 'dim')
         threading.Thread(target=run, daemon=True).start()
 
+    def _lt_auto_disable_duplicate(self):
+        """Дубль (то же время два скана подряд) — глушим автоскан в главном потоке."""
+        self.lbl_lt_result.config(text=self.t('limit_tracker_duplicate'), fg=WARN)
+        self.v_lt_auto.set(False)
+        self._lt_toggle_auto()
+        self._log(self.t('limit_tracker_duplicate'), 'warn')
+
     def _lt_scan(self):
         def run():
-            self.root.after(0, lambda: self.lbl_lt_result.config(text=self.t('limit_tracker_scanning'), fg=DIM))
-            windows = find_claude_windows(self._slog)
-            if not windows:
+            # Кнопка и авто-воркер могут запустить два скана разом —
+            # тогда они кликают по сайдбару вперемешку.
+            if not self._lt_scan_lock.acquire(blocking=False):
                 self.root.after(0, lambda: self.lbl_lt_result.config(
-                    text=self.t('log_no_app'), fg=ERR))
+                    text=self.t('limit_tracker_scanning'), fg=DIM))
                 return
-            result = find_limit_in_all_chats(windows[0], self._slog)
-            if result:
-                h, m, chat_name = result
-                time_str = f'{h:02d}:{m:02d}'
-                self._lt_reset_hm = (h, m)
-                self._lt_last_scan = datetime.datetime.now()
-                self._lt_last_chat = chat_name
-
-                # История лимитов (последние 3)
-                self._lt_history.insert(0, time_str)
-                if len(self._lt_history) > 3:
-                    self._lt_history.pop()
-
-                # Проверка на дубль (два раза подряд одно время = лимит не сбросился)
-                if self._lt_prev_time == time_str:
-                    self.root.after(0, lambda: self.lbl_lt_result.config(
-                        text=self.t('limit_tracker_duplicate'), fg=WARN))
-                    self.v_lt_auto.set(False)
-                    self._slog(self.t('limit_tracker_duplicate'), 'warn')
-                    self._lt_toggle_auto()
-                    return
-
-                self._lt_prev_time = time_str
-                txt = self.t('limit_tracker_found', time=time_str)
-                self.root.after(0, lambda: self.lbl_lt_result.config(text=txt, fg=ACC))
-                self.root.after(0, self._lt_update_history_display)
-                self.root.after(0, self._lt_add_to_plan)
-                # Уведомление
-                if HAS_NOTIF and self._cfg.get('notif', True):
-                    try:
-                        title = self.t('limit_tracker_notif_title', time=time_str)
-                        msg = self.t('limit_tracker_found_in', chat=chat_name[:40])
-                        _plyer_notif.notify(title=title, message=msg, timeout=10)
-                    except Exception:
-                        pass
-            else:
-                self._lt_reset_hm = None
-                self._lt_last_scan = datetime.datetime.now()
-                self.root.after(0, lambda: self.lbl_lt_result.config(
-                    text=self.t('limit_tracker_not_found'), fg=DIM))
-                self.root.after(0, self._lt_update_history_display)
+            try:
+                self._lt_scan_impl()
+            finally:
+                self._lt_scan_lock.release()
         threading.Thread(target=run, daemon=True).start()
+
+    def _lt_scan_impl(self):
+        self.root.after(0, lambda: self.lbl_lt_result.config(text=self.t('limit_tracker_scanning'), fg=DIM))
+        windows = find_claude_windows(self._slog)
+        if not windows:
+            self.root.after(0, lambda: self.lbl_lt_result.config(
+                text=self.t('log_no_app'), fg=ERR))
+            return
+        result = find_limit_in_all_chats(windows[0], self._slog)
+        if result:
+            h, m, chat_name = result
+            time_str = f'{h:02d}:{m:02d}'
+            self._lt_reset_hm = (h, m)
+            self._lt_last_scan = datetime.datetime.now()
+            self._lt_last_chat = chat_name
+
+            # История лимитов (последние 3)
+            self._lt_history.insert(0, time_str)
+            if len(self._lt_history) > 3:
+                self._lt_history.pop()
+
+            # Проверка на дубль (два раза подряд одно время = лимит не сбросился)
+            if self._lt_prev_time == time_str:
+                self.root.after(0, self._lt_auto_disable_duplicate)
+                return
+
+            self._lt_prev_time = time_str
+            txt = self.t('limit_tracker_found', time=time_str)
+            self.root.after(0, lambda: self.lbl_lt_result.config(text=txt, fg=ACC))
+            self.root.after(0, self._lt_update_history_display)
+            self.root.after(0, self._lt_add_to_plan)
+            # Уведомление
+            if HAS_NOTIF and self._cfg.get('notif', True):
+                try:
+                    title = self.t('limit_tracker_notif_title', time=time_str)
+                    msg = self.t('limit_tracker_found_in', chat=chat_name[:40])
+                    _plyer_notif.notify(title=title, message=msg, timeout=10)
+                except Exception:
+                    pass
+        else:
+            self._lt_reset_hm = None
+            self._lt_last_scan = datetime.datetime.now()
+            self.root.after(0, lambda: self.lbl_lt_result.config(
+                text=self.t('limit_tracker_not_found'), fg=DIM))
+            self.root.after(0, self._lt_update_history_display)
 
     def _lt_add_to_plan(self):
         if not self._lt_reset_hm:
@@ -2702,12 +2870,12 @@ class App:
             self._lt_next_scan_time = datetime.datetime.now()
             self._save_settings()
             threading.Thread(target=self._lt_auto_worker, daemon=True).start()
-            self._slog('Автосканирование лимита включено', 'dim')
+            self._slog(self.t('log_lt_auto_on'), 'dim')
         else:
             self._lt_auto_stop_evt.set()
             self._lt_next_scan_time = None
             self._save_settings()
-            self._slog('Автосканирование лимита выключено', 'dim')
+            self._slog(self.t('log_lt_auto_off'), 'dim')
 
     def _lt_auto_worker(self):
         """Фоновый worker — сканирует лимит каждый интервал (15-120 мин)."""
@@ -2823,13 +2991,32 @@ class App:
             return
         self._plan_stop_evt.clear()
         self._plan_running = True
+        # Опции фиксируем на момент запуска плана — воркер не читает tk-переменные
+        self._plan_opts = {
+            'indices': sorted(self._selected_chat_idx) or [0],
+            'try_again': bool(self.v_btn_try.get()),
+            'cont': bool(self.v_btn_cont.get()),
+            'conf': float(self.v_conf.get()),
+            'repeat': bool(self.v_plan_repeat.get()),
+            'notify': bool(self.v_notif.get()),
+        }
         self.btn_plan_start.recolor(ERR, '#fff', '#ff6b6b')
         self.btn_plan_start.config(text=self.t('plan_stop_btn'))
         self._log(self.t('log_plan_started', n=len(self._plan)), 'accent')
         self._pc.set_outline(ACC)
         threading.Thread(target=self._plan_worker, daemon=True).start()
 
+    def _remove_plan_entry(self, hm):
+        """Удаление сработавшего разового времени — только в главном потоке,
+        с немедленным сохранением (иначе время воскресало из settings.json)."""
+        if hm in self._plan:
+            self._plan.remove(hm)
+            self._refresh_plan_list()
+            self._update_plan_status()
+            self._save_settings()
+
     def _plan_worker(self):
+        o = getattr(self, '_plan_opts', {})
         while not self._plan_stop_evt.is_set():
             targets = self._plan_next_targets()
             if not targets:
@@ -2846,20 +3033,18 @@ class App:
                 return
 
             self._slog(self.t('log_plan_trigger', time=next_t.strftime('%H:%M')), 'warn')
-            indices = sorted(self._selected_chat_idx) or [0]
-            try_again, auto_cont = self.v_btn_try.get(), self.v_btn_cont.get()
-            conf = self.v_conf.get()
-            ok = run_cycle(indices, try_again, auto_cont, conf, self._slog, self._badge)
+            ok = self._do_cycle(o.get('indices') or [0],
+                                o.get('try_again', True), o.get('cont', True),
+                                o.get('conf', 0.82))
             self._stat_click(ok)
             self._add_history(ok)
-            self._notify(ok)
+            self._notify(ok, o.get('notify', False))
 
-            if not self.v_plan_repeat.get():
+            if not o.get('repeat', True):
                 fired = (next_t.hour, next_t.minute)
-                if fired in self._plan:
-                    self._plan.remove(fired)
-                    self.root.after(0, self._refresh_plan_list)
-                if not self._plan:
+                remaining = [x for x in self._plan if x != fired]
+                self.root.after(0, self._remove_plan_entry, fired)
+                if not remaining:
                     break
 
         if not self._plan_stop_evt.is_set():
@@ -2895,4 +3080,4 @@ if __name__ == '__main__':
 
 # Author: Anton Petnitsky
 # GitHub: https://github.com/Mukller/claude-auto-continue
-# Last modified: 2026-07-29 22:43:18 +0300
+# Last modified: 2026-08-23

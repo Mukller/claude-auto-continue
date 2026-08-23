@@ -255,3 +255,45 @@ def test_headless_logger_counts_existing_file(tmp_path):
         log('new %d' % i)
     count = len(lf.read_text(encoding='utf-8').splitlines())
     assert count <= 100
+
+
+# --- Профильные overrides из settings.json ---
+
+def test_resolve_profile_overrides_whitelist():
+    ov = {'cursor': {'button_labels': ['Ещё раз'], 'bogus_key': 1}}
+    p = app._resolve_profile('cursor', ov)
+    assert p['button_labels'] == ['Ещё раз']
+    assert 'process' in p and 'bogus_key' not in p
+    # базовый реестр не мутирует и другие профили не задеты
+    assert app.APP_PROFILES['cursor']['button_labels'] != ['Ещё раз']
+    assert app._resolve_profile('windsurf', ov)['label'] == 'Windsurf'
+
+
+def test_resolve_profile_bad_overrides_ignored():
+    p = app._resolve_profile('cursor', {'cursor': 'not-a-dict', 42: {}})
+    assert p['label'] == 'Cursor'
+
+
+def test_profile_persists_via_settings(tmp_path, monkeypatch):
+    import claude_continue_gui as m
+    m.SETTINGS_FILE = str(tmp_path / 'settings.json')
+    root = tk_root = None
+    # сохранение: главный поток пишет текущий профиль в файл
+    class Store: pass
+    fake = object.__new__(m.App)
+    fake.lang = 'ru'; fake._theme = 'dark'
+    fake._cfg = {}; fake._history = []
+    fake._running = False; fake._target = None
+    fake._plan = []
+    fake._tray_minimize = type('V', (), {'get': lambda s: True})()
+    fake._selected_chat_idx = set()
+    m._CURRENT_PROFILE['name'] = 'cursor'
+    called = {}
+    for attr, val in [('sp_h', 5), ('sp_m', 0)]:
+        setattr(fake, attr, type('S', (), {'get': lambda s, v=val: v})())
+    fake._sg = lambda a, d: d
+    fake._sgv = lambda a, d: d
+    fake._watch_interval = lambda: 30
+    m.App._save_settings(fake)
+    data = __import__('json').load(open(m.SETTINGS_FILE, encoding='utf-8'))
+    assert data['profile'] == 'cursor'

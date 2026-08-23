@@ -90,12 +90,22 @@ def profile_names():
     return sorted(APP_PROFILES)
 
 
-def resolve_profile(name):
-    """Профиль по имени; неизвестное/пустое -> эталонный claude."""
+def resolve_profile(name, overrides=None):
+    """Профиль по имени; неизвестное/пустое -> эталонный claude.
+
+    overrides — словарь вида {"cursor": {"button_labels": [...]}};
+    применяются только ключи, уже существующие в базовом профиле
+    (whitelist), чтобы опечатка в настройках не сломала движок."""
     key = (name or DEFAULT_PROFILE).strip().lower()
     if key not in APP_PROFILES:
         key = DEFAULT_PROFILE
-    return APP_PROFILES[key]
+    prof = dict(APP_PROFILES[key])
+    ov = (overrides or {}).get(key)
+    if isinstance(ov, dict):
+        for k, v in ov.items():
+            if k in prof:
+                prof[k] = v
+    return prof
 
 
 # ── Парсер времени сброса лимита ─────────────────────────────────────────────

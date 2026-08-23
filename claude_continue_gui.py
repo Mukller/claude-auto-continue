@@ -30,7 +30,8 @@ from collections import deque
 from engine import (parse_limit_text, has_limit_context,
                     next_reset_occurrence, cli_target as _cli_target,
                     APP_PROFILES, DEFAULT_PROFILE, profile_names,
-                    resolve_profile as _resolve_profile)
+                    resolve_profile as _resolve_profile,
+                    mac_pick_chat_titles)
 if IS_WIN:
     from ctypes import wintypes
     try:
@@ -466,13 +467,91 @@ def get_process_exe(hwnd: int) -> str:
         return ''
 
 
+_AX_MOD = None
+
+
+def _ax():
+    """Ленивый импорт ApplicationServices (pyobjc); None если нет."""
+    global _AX_MOD
+    if _AX_MOD is None:
+        try:
+            import ApplicationServices as _A
+            _AX_MOD = _A
+        except Exception:
+            _AX_MOD = False
+    return _AX_MOD or None
+
+
+def _ax_copy(el, attr):
+    try:
+        err, val = _ax().AXUIElementCopyAttributeValue(el, attr, None)
+        return val if err == 0 else None
+    except Exception:
+        return None
+
+
+def _flatten_ax(el, out, depth=0, cap=3000):
+    if depth > 12 or len(out) >= cap:
+        return
+    A = _ax()
+    role = _ax_copy(el, A.kAXRoleAttribute) or ''
+    title = _ax_copy(el, A.kAXTitleAttribute) or ''
+    out.append((role, title, el))
+    kids = _ax_copy(el, A.kAXChildrenAttribute) or []
+    for ch in kids:
+        _flatten_ax(ch, out, depth + 1, cap)
+
+
+def _find_sidebar_chats_mac(log_fn):
+    """Чаты сайдбара через Accessibility; [{'name','el'}]."""
+    A = _ax()
+    pid = _MAC_PID.get('pid')
+    if not A or not pid:
+        return []
+    try:
+        app_el = A.AXUIElementCreateApplication(int(pid))
+        flat = []
+        _flatten_ax(app_el, flat)
+        prof = _profile()
+        titles = mac_pick_chat_titles(
+            [(r, t) for r, t, _ in flat],
+            prof['button_labels'], prof['sidebar_chrome'],
+            prof['sidebar_prefixes'])
+        el_by_name = {}
+        for role, title, el in flat:
+            if role == 'AXButton' and title and title in titles \
+                    and title not in el_by_name:
+                el_by_name[title] = el
+        log_fn(f'  Mac/AX: чатов найдено {len(titles)}', 'dim')
+        return [{'name': t, 'el': el_by_name[t]} for t in titles
+                if t in el_by_name]
+    except Exception as e:
+        log_fn(f'  Mac/AX ошибка: {e}', 'dim')
+        return []
+
+
+def _press_mac(el) -> bool:
+    """kAXPressAction на элементе."""
+    try:
+        return _ax().AXUIElementPerformAction(
+            el, _ax().kAXPressAction) == 0
+    except Exception:
+        return False
+
+
+_MAC_PID = {'pid': None}
+
+
 def _find_claude_windows_mac(log_fn):
     import subprocess as _sp
     try:
         r = _sp.run(['pgrep', '-i', '-x', 'Claude'],
                     capture_output=True, text=True, timeout=3)
         if r.returncode == 0:
-            return [{'title': 'Claude Desktop', 'ctrl': None, 'hwnd': None}]
+            pids = [int(x) for x in r.stdout.split()[:1]]
+            _MAC_PID['pid'] = pids[0] if pids else None
+            return [{'title': 'Claude Desktop', 'ctrl': None,
+                     'hwnd': None}]
     except Exception as e:
         log_fn(f'  Mac: поиск Claude: {e}', 'dim')
     return []
@@ -654,6 +733,8 @@ def find_message_input(window_ctrl, log_fn, max_nodes=6000, time_budget=3.0):
 
 
 def find_sidebar_chats(window_ctrl, log_fn, max_nodes=6000, time_budget=4.0) -> list:
+    if IS_MAC:
+        return _find_sidebar_chats_mac(log_fn)
     """Список чатов — кнопки внутри навигационного сайдбара, отфильтрованные
     от обвязки (Pinned/Recents/More options/Relaunch to update и т.п.)."""
     if not HAS_UIA:
@@ -1106,7 +1187,15 @@ def _run_cycle_impl(n_or_indices, search_try_again: bool, auto_continue: bool,
             # Прямоугольники протухают после первого же клика (подсветка,
             # пересортировка Recents) — перед каждым переключением заново
             # ищем чат по имени (#7).
-            if not _switch_to_chat(window['ctrl'], name, log_fn):
+            if IS_MAC and _MAC_PID['pid']:
+                # mac: повторно ищем элемент по имени в AX-дереве
+                chats_now = _find_sidebar_chats_mac(log_fn)
+                el = next((c['el'] for c in chats_now
+                           if c['name'] == name), None)
+                if not el or not _press_mac(el):
+                    log_fn(f'  [{i+1}] {name[:40]} - не нажалось, пропуск', 'dim')
+                    continue
+            elif not _switch_to_chat(window['ctrl'], name, log_fn):
                 log_fn(f'  [{i+1}] «{name[:40]}» не найден при перепроверке — пропуск', 'dim')
                 continue
             time.sleep(0.7)

@@ -5,6 +5,39 @@ All notable changes will be documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
+### Fixed
+- **Single tick chain after theme switch** — finishing the generation mechanism:
+  `_tick` now takes a generation argument and stale scheduled callbacks exit
+  immediately when `_set_theme` bumps the counter; previously two parallel
+  10 Hz redraw chains could run at once.
+- **Chats are re-resolved by name before each switch** — rectangles captured
+  before the first click went stale after Claude re-sorts Recents, so clicks
+  landed on the wrong rows; targets are matched by name against a fresh
+  sidebar scan, missing chats are skipped with a log line.
+- **Negative chat indices no longer select the last chat** — `-1` passed the
+  old `i < len(chats)` check due to Python negative indexing.
+- **Honest duplicate detection in the limit tracker** — comparing HH:MM strings
+  flagged any two scans inside one limit window; duplicates are now detected
+  only while the previous reset time is still in the future
+  (`next_reset_occurrence`).
+- **Import survives read-only install dirs** — `os.makedirs(templates)` at
+  module import crashed under Program Files / /Applications.
+- **Process path buffer widened to 1024 chars** — long Python paths were
+  truncated in `get_process_exe`.
+- **Registry handles closed in `finally`** — autostart get/set leaked the key
+  handle when `QueryValueEx`/`SetValueEx` raised.
+- **Maximized Claude is no longer restored every cycle** — `ShowWindow(SW_RESTORE)`
+  fired unconditionally; now only when the window is actually minimized (`IsIconic`).
+- **Buttons resize with their label** — `FlatBtn.config(text=…)` re-measures the
+  required size, so RU↔EN and ВКЛ↔ВЫКЛ switches no longer clip the caption.
+- **First window scan deferred** — `_scan_now()` from `__init__` could hit
+  `root.after()` before `mainloop()` on some machines (`RuntimeError`); it is
+  scheduled via `after(400, …)` instead.
+- **Autostart uses `pythonw.exe` when available** — no console window flash at logon.
+- **MouseWheel binding no longer accumulates** — theme rebuilds stacked duplicate
+  `bind_all('<MouseWheel>')` handlers, making scroll faster each time.
+- **Template capture grabs the screen before restoring the app window** — otherwise
+  the de-iconified main window could overlap the captured region.
 
 ## [3.11.0] - 2026-08-23
 ### Changed

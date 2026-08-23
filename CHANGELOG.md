@@ -5,6 +5,34 @@ All notable changes will be documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
+
+## [3.12.0] - 2026-08-23
+### Added
+- **CLI / headless mode** - run without the GUI: `--headless --at 05:00`,
+  `--now`, `--once`, `--interval SEC`, `--chats N`, `--log-file PATH`.
+  Same engine as the GUI; argument validation is testable without UIA and
+  console output survives cp1251 terminals.
+- **engine.py module** - pure stdlib logic (limit-time parser with context
+  filter, reset occurrence helper, CLI target parsing) extracted from the
+  monolith; importable without tkinter/UIA, re-exported by the GUI so all
+  existing callers keep working.
+- **PyInstaller releases** - pushing a `v*` tag builds a one-file
+  `ClaudeAutoContinue.exe` (GitHub Actions) and attaches it to the release;
+  users no longer need Python installed.
+- README: CLI examples and build notes.
+### Fixed
+- **Limit tracker ignores chat history** - text collection excludes the
+  sidebar by geometry, keeps only the last message nodes and requires
+  limit/usage/лимит keywords near the time (`require_context=True`), so an
+  old "we discussed resets at 3 PM" no longer produces a phantom reset.
+- **GUI failed to launch after the #20 squash merge** - duplicate
+  `FlatBtn._measure` definitions shadowed each other and the constructor
+  called the dead signature (`TypeError` on every button).
+- **Limit auto-scan enable crash and dead 3-strike dedup** - worker was
+  started without its generation argument and the duplicate handler was
+  invoked without a count; generations are now the single liveness
+  mechanism (rapid off->on race included) and three identical scans are
+  required before auto-scan disables itself.
 ### Fixed
 - **Single tick chain after theme switch** — finishing the generation mechanism:
   `_tick` now takes a generation argument and stale scheduled callbacks exit

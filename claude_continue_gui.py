@@ -618,7 +618,7 @@ def bring_to_foreground(hwnd, log_fn=lambda *a, **k: None) -> bool:
 def _profile_matches_window(prof, exe_path: str, title: str) -> bool:
     """exe-имя из профиля + опциональный хинт по заголовку окна."""
     low = (exe_path or '').lower()
-    base = low.rsplit('\\', 1)[-1]
+    base = re.split(r'[/\\]', low)[-1]  # оба разделителя: / и \
     if base not in prof['process']:
         return False
     for bad in prof.get('exclude_process_substrings', []):

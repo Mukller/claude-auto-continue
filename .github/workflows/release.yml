@@ -18,7 +18,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller pytest
       - name: Run tests
         run: pytest test_logic.py -q
       - name: Build one-file exe

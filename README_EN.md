@@ -4,7 +4,7 @@
 
 </div>
 
-# ⚡ Claude Code Auto-Continue
+# ⚡ Electron Auto-Continue
 
 <p align="center">
   <a href="https://github.com/Mukller">
@@ -13,100 +13,100 @@
 </p>
 
 > [!NOTE]
-> Anthropic released a Claude Desktop update that added this exact function (automatic continuation after hitting a limit) natively to the app. Because of this, support for this project is currently paused.
+> Previously **claude-auto-continue**, targeting Claude Desktop only.
+> The engine is now app-agnostic: Claude works out of the box, while
+> Cursor / Windsurf / Copilot Chat ship as experimental profiles.
 
-Automatically finds and clicks the **Try again** button in Claude Desktop on a schedule — when the server temporarily rate-limits requests. It can switch between multiple chats in a single window's sidebar and press **Enter** to resume a session that's simply waiting for input after hitting a usage limit.
+Universal auto-resume for Electron AI chats: automatically finds the
+**Try again / Retry / Resume** button when the server rate-limits you and
+presses **Enter** to continue the stalled session. Fires on a schedule and
+can switch between sidebar chats within one window.
 
-The button is located via **UI Automation text search** (Windows) or **screenshot template matching** (macOS). Electron apps often don't assign the correct ARIA role to their elements, so the search matches visible text on any control type.
+Buttons are located via **UI Automation text search** (Windows) or
+**screenshot templates** (macOS). Electron apps often lack proper ARIA roles,
+so matching runs on visible text of any element type.
 
-<div align="center">
-<img src="screenshots/app-idle.png" width="46%" alt="Main screen — schedule, detected Claude Desktop window and chat list" />
-<img src="screenshots/app-running.png" width="46%" alt="Countdown running before the scheduled trigger" />
-</div>
+[![Main window](screenshots/app-idle.png)](screenshots/app-idle.png)
+[![Countdown](screenshots/app-running.png)](screenshots/app-running.png)
 
 ---
 
 ## Features
 
-- **Schedule** — fire at an exact time (e.g. when limits reset overnight)
-- **Scheduled plan (cycles)** — add multiple trigger times (05:00, 08:00, 17:00…), each fires the full cycle independently. Optional daily repeat, or one-shot entries that remove themselves after firing.
-- **Auto button search** — no manual template capture; finds "Try again" by text via UI Automation (Windows) or by screenshot (macOS)
-- **Switch between chats in the sidebar** — visits selected chats and processes each one (Windows; on macOS — current view only)
-- **Two independent per-chat actions:**
-  - `Try again` — finds and clicks the real button (server temporarily rate-limiting requests)
-  - `Continue` — presses **Enter** after switching into the chat, regardless of whether any button was found
-- **Watch mode** — repeats the check every N seconds
-- **Fallback option** — if auto-search doesn't find the button, capture a button template from a screenshot once
-- **Dark and light theme**, one-click toggle
-- **System tray** and **desktop notifications** (optional dependencies)
-- **Autostart** on login (Windows Registry / macOS LaunchAgent)
-- Ring countdown timer
+- **App profiles** — Claude Desktop out of the box; Cursor / Windsurf /
+  Copilot Chat as experimental presets. A profile = process exe + retry
+  button labels + input field names + sidebar navigation dictionaries
+- **Schedule** — fire at an exact time (e.g. nightly limit reset)
+- **Plan of triggers (cycles)** — multiple times, daily repeat or one-shot entries
+- **Two actions per chat:** `Try again` — click the real button; `Continue` — press Enter after switching (draft-safe: if the input already has typed text, Enter is skipped)
+- **Watch mode** — re-check every N seconds
+- **Limit tracker** — reads the reset time from Claude's message and adds it to the plan
+- **Screenshot fallback** — capture a button template with the mouse
+- **CLI/headless** — night runs without a window, log to file
+- Dark/light theme, system tray, notifications, autostart, stats and trigger history
 
----
-
-## Installation
+## Install
 
 ```bash
 pip install -r requirements.txt
 ```
 
-**Windows:** `pyautogui`, `pillow`, `uiautomation` are required.  
-**macOS:** `pyautogui`, `pillow` are required; `uiautomation` is Windows-only and not needed.  
-`opencv-python-headless` is only needed for the fallback (tolerant template matching).
+**Windows:** `pyautogui`, `pillow`, `uiautomation` are required.
+**macOS:** `pyautogui`, `pillow`; `uiautomation` is Windows-only.
+`opencv-python-headless` — only for the template fallback.
 
-## Run
+## Run GUI
 
 ```bash
 python claude_continue_gui.py
 ```
 
----
+Or via `run.bat` (Windows). The **"App: …"** button in the window card cycles
+profiles; after switching press **"↻ Find"** to rescan.
 
-## How to use
+### CLI / headless
 
-1. Open Claude Desktop, click **"↻ Find"** in the app — it shows the detected window and the list of chats in the sidebar.
-2. Check the chats you want to process.
-3. Check the actions you want — `Try again` and/or `Continue` (both at once is fine).
-4. Click **"🔍 Check now"** to test finding the Try again button without switching chats or pressing Enter.
-5. Set the time and click **START**.
+```bash
+python claude_continue_gui.py --headless --at 05:00                  # fire at 05:00
+python claude_continue_gui.py --headless --now --profile cursor      # Cursor cycle now
+python claude_continue_gui.py --list-profiles                        # list profiles
+```
 
-> **macOS:** Sidebar chat switching is not available (no UI Automation). The app activates Claude via `osascript` and clicks the button in the currently visible chat.
+Flags: `--once`, `--interval SEC`, `--chats N`, `--no-try-again`,
+`--no-continue`, `--confidence`, `--log-file PATH`. Full list: `--help`.
 
----
+### Build exe
 
-## Platform support
+Pushing a `v*` tag builds a one-file `ClaudeAutoContinue.exe` via PyInstaller
+(`.github/workflows/release.yml`) and attaches it to the release.
 
-| Feature | Windows | macOS |
-|---|---|---|
-| Find Claude window | ✅ UI Automation | ✅ `pgrep` |
-| Bring to foreground | ✅ AttachThreadInput | ✅ `osascript` |
-| Sidebar chat switching | ✅ | ❌ |
-| Find Try again button | ✅ UI Automation + template | ✅ template |
-| Autostart on login | ✅ Registry | ✅ LaunchAgent |
+## Profiles
 
----
+| Profile | App | Status | Process |
+|---|---|---|---|
+| `claude` | Claude Desktop | ✅ reference | `claude.exe` |
+| `cursor` | Cursor | 🧪 experimental | `cursor.exe` |
+| `windsurf` | Windsurf | 🧪 experimental | `windsurf.exe` |
+| `copilot` | VS Code Copilot Chat | 🧪 experimental | `code.exe` + window title |
+
+Experimental profiles are best-effort presets: each app's UIA tree was not
+verified element-by-element, and button labels depend on app version and UI
+language. If a profile misses — tweak `APP_PROFILES` in `engine.py` and send a PR.
 
 ## Known limitations
 
-- If the Claude window is covered by another window and `bring_to_foreground` fails, a click can land in the wrong place. The app logs a warning in that case.
-- The fallback template search is sensitive to UI scale/theme — recapture the template after a theme or DPI change.
-- `Continue`: before pressing Enter the input box is read via UIA — if it already contains typed text, Enter is skipped (a warning is logged). If the input can't be found, Enter is pressed "blindly".
+- If the app window stays covered because `bring_to_foreground` failed, a click may land elsewhere — the app logs a warning
+- The screenshot fallback is sensitive to scale/theme — recapture templates after changing theme or DPI
+- Experimental profiles: element names change between app versions
 
 ## Emergency stop
 
 Flinging the mouse into a **screen corner** (FAILSAFE) instantly aborts a running cycle — clicks stop and an emergency-stop entry appears in the log.
 
-## Requirements
-
-- Windows 10/11 or macOS 12+
-- Python 3.9+
-
----
-
 ## Documentation
 
-- [CHANGELOG.md](CHANGELOG.md) — version history
-- [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute
+- [CHANGELOG.md](CHANGELOG.md) — release history
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contributing guide
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — code of conduct
 - [RELEASE_INFO.md](RELEASE_INFO.md) — release installation
 - [LICENSE.md](LICENSE.md) — MIT license

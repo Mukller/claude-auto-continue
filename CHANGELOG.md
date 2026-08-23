@@ -6,6 +6,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [3.13.0] - 2026-08-23
+### Added
+- **App profiles — pivot to universal Electron auto-continue.** The engine is
+  no longer bound to claude.exe: a profile registry (`engine.APP_PROFILES`)
+  describes process matching, retry button labels, input field names, sidebar
+  navigation dictionaries and an optional window-title hint. Claude Desktop is
+  the unchanged reference profile; Cursor / Windsurf / VS Code Copilot Chat
+  ship as experimental presets.
+- GUI "App: …" button cycles profiles; the selection persists in settings.json.
+- CLI `--profile NAME` (validated choices) and `--list-profiles`.
+- Profile-aware "not found" messages.
+- 5 new tests: profile fallback resolution, registry well-formedness,
+  reference Claude behavior, experimental marks, CLI validation.
+
+
 ## [3.12.0] - 2026-08-23
 ### Added
 - **CLI / headless mode** - run without the GUI: `--headless --at 05:00`,

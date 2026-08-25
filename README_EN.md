@@ -4,7 +4,7 @@
 
 </div>
 
-# ⚡ Electron Auto-Continue
+# Electron Auto-Continue
 
 <p align="center">
   <a href="https://github.com/Mukller">
@@ -44,7 +44,7 @@ so matching runs on visible text of any element type.
 - **Screenshot fallback** — capture a button template with the mouse
 - **CLI/headless** — night runs without a window, log to file
 - Dark/light theme, system tray, notifications, autostart, stats and trigger history
-- **macOS**: 🧪 sidebar chat switching via Accessibility API (grant the permission when prompted); without pyobjc - current-view mode
+- **macOS**: sidebar chat switching via Accessibility API (grant the permission when prompted); without pyobjc - current-view mode
 
 ## Install
 
@@ -85,10 +85,10 @@ Pushing a `v*` tag builds a one-file `ClaudeAutoContinue.exe` via PyInstaller
 
 | Profile | App | Status | Process |
 |---|---|---|---|
-| `claude` | Claude Desktop | ✅ reference | `claude.exe` |
-| `cursor` | Cursor | 🧪 experimental | `cursor.exe` |
-| `windsurf` | Windsurf | 🧪 experimental | `windsurf.exe` |
-| `copilot` | VS Code Copilot Chat | 🧪 experimental | `code.exe` + window title |
+| `claude` | Claude Desktop | reference | `claude.exe` |
+| `cursor` | Cursor | experimental | `cursor.exe` |
+| `windsurf` | Windsurf | experimental | `windsurf.exe` |
+| `copilot` | VS Code Copilot Chat | experimental | `code.exe` + window title |
 
 Experimental profiles are best-effort presets: each app's UIA tree was not
 verified element-by-element, and button labels depend on app version and UI

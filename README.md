@@ -4,7 +4,7 @@
 
 </div>
 
-# ⚡ Electron Auto-Continue
+# Electron Auto-Continue
 
 <p align="center">
   <a href="https://github.com/Mukller">
@@ -44,7 +44,7 @@
 - **Резервный поиск по скриншоту** — захват шаблона кнопки мышью
 - **CLI/headless** — ночные прогоны без окна, лог в файл
 - Тёмная/светлая тема, системный трей, уведомления, автозапуск, статистика и история срабатываний
-- **macOS**: 🧪 переключение чатов сайдбара через Accessibility API (выдайте разрешение при первом запросе); без pyobjc — работа с текущим чатом
+- **macOS**: переключение чатов сайдбара через Accessibility API (выдайте разрешение при первом запросе); без pyobjc — работа с текущим чатом
 
 ## Установка
 
@@ -85,10 +85,10 @@ python claude_continue_gui.py --list-profiles                        # спис�
 
 | Профиль | Приложение | Статус | Процесс |
 |---|---|---|---|
-| `claude` | Claude Desktop | ✅ эталон | `claude.exe` |
-| `cursor` | Cursor | 🧪 экспериментальный | `cursor.exe` |
-| `windsurf` | Windsurf | 🧪 экспериментальный | `windsurf.exe` |
-| `copilot` | VS Code Copilot Chat | 🧪 экспериментальный | `code.exe` + заголовок окна |
+| `claude` | Claude Desktop | эталон | `claude.exe` |
+| `cursor` | Cursor | экспериментальный | `cursor.exe` |
+| `windsurf` | Windsurf | экспериментальный | `windsurf.exe` |
+| `copilot` | VS Code Copilot Chat | экспериментальный | `code.exe` + заголовок окна |
 
 Экспериментальные профили — best-effort пресеты: дерево UIA каждого приложения
 не сверялось поэлементно, лейблы кнопок зависят от версии и языка интерфейса.

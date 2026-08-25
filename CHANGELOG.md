@@ -23,7 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
   saved to settings.json and restored on next launch.
 - **Sound notification** - system beep (Windows MessageBeep / macOS
   Glass.aiff) after a successful cycle.
-- **Export/Import settings** - ⬆/⬇ buttons save and restore the full
+- **Export/Import settings** - / buttons save and restore the full
   configuration as a JSON file; import offers app restart.
 - **Auto-detect Windows dark/light theme** - first launch reads
   AppsUseLightTheme from registry instead of defaulting to dark.

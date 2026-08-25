@@ -43,4 +43,4 @@ Types: feat, fix, docs, refactor, test, chore
 
 Open an Issue or Discussion.
 
-Thank you! 🚀
+Thank you!
